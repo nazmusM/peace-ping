@@ -15,12 +15,25 @@ class Database
             mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
             try {
-                self::$instance = new mysqli(
-                    $config['host'],
-                    $config['user'],
-                    $config['password'],
-                    $config['database'],
-                    isset($config['port']) ? (int) $config['port'] : 3306
+                $host = (string) ($config['host'] ?? '127.0.0.1');
+                $user = (string) ($config['user'] ?? '');
+                $password = (string) ($config['password'] ?? '');
+                $database = (string) ($config['database'] ?? '');
+                $port = isset($config['port']) && $config['port'] !== '' ? (int) $config['port'] : 3306;
+                $socket = isset($config['socket']) && $config['socket'] !== '' ? (string) $config['socket'] : null;
+
+                self::$instance = mysqli_init();
+                if (self::$instance === false) {
+                    throw new mysqli_sql_exception('Database initialization failed.');
+                }
+
+                self::$instance->real_connect(
+                    $host,
+                    $user,
+                    $password,
+                    $database,
+                    $port,
+                    $socket
                 );
                 self::$instance->set_charset('utf8mb4');
             } catch (mysqli_sql_exception $exception) {
