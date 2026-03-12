@@ -5,7 +5,7 @@ return [
         'host' => getenv('DB_HOST') ?: '127.0.0.1',
         'database' => getenv('DB_NAME') ?: 'peace_ping',
         'user' => getenv('DB_USER') ?: 'root',
-        'password' => getenv('DB_PASSWORD') ?: (getenv('DB_PASS') ?: ''),
+        'password' => getenv('DB_PASS') ?: (getenv('DB_PASS') ?: ''),
         'port' => getenv('DB_PORT') ?: '3306',
         'socket' => getenv('DB_SOCKET') ?: '',
     ],

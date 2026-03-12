@@ -1,7 +1,5 @@
 <?php
 
-declare(strict_types=1);
-
 use App\Controllers\PingController;
 use App\Controllers\PreferenceController;
 use App\Controllers\StatusController;
