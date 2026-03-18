@@ -3,6 +3,7 @@
 use App\Controllers\PingController;
 use App\Controllers\PreferenceController;
 use App\Controllers\StatusController;
+use App\Controllers\UserController;
 use App\Database\Database;
 use App\Fingerprint;
 use App\Services\MatchService;
@@ -10,6 +11,8 @@ use App\Services\NotificationService;
 use App\Services\PingService;
 use App\Services\PreferenceService;
 use App\Services\StatusService;
+use App\Services\UserService;
+use App\Utils\Encryption;
 use App\Utils\RateLimiter;
 use App\Utils\Response;
 
@@ -17,6 +20,8 @@ require_once __DIR__ . '/src/bootstrap.php';
 
 $db = Database::getConnection($config['db']);
 $fingerprint = new Fingerprint();
+$encryption = new Encryption($config['security']['encryption_key'] ?? '');
+$userService = new UserService($db, $fingerprint, $encryption, $config['security']['pepper']);
 $matchService = new MatchService($db);
 $notificationService = new NotificationService(
     $config['notifications']['email_from'],
@@ -25,6 +30,7 @@ $notificationService = new NotificationService(
 $pingService = new PingService(
     $db,
     $fingerprint,
+    $userService,
     $matchService,
     $notificationService,
     $config['security']['pepper']
@@ -32,6 +38,7 @@ $pingService = new PingService(
 $preferenceService = new PreferenceService(
     $db,
     $fingerprint,
+    $userService,
     $matchService,
     $notificationService,
     $config['security']['pepper']
@@ -46,21 +53,31 @@ $rateLimiter = new RateLimiter(
 $pingController = new PingController($pingService, $rateLimiter);
 $preferenceController = new PreferenceController($preferenceService);
 $statusController = new StatusController($statusService);
+$userController = new UserController($userService);
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
+// User registration endpoint
+if ($method === 'POST' && preg_match('#/api/register$#', $path) === 1) {
+    $userController->handle();
+    exit;
+}
+
+// Ping endpoint (updated to support both legacy and new format)
 if ($method === 'POST' && preg_match('#/api/ping$#', $path) === 1) {
     $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
     $pingController->handle($clientIp);
     exit;
 }
 
+// Preference endpoint (updated to support both legacy and new format)
 if ($method === 'POST' && preg_match('#/api/preference$#', $path) === 1) {
     $preferenceController->handle();
     exit;
 }
 
+// Status endpoint
 if ($method === 'POST' && preg_match('#/api/status$#', $path) === 1) {
     $statusController->handle();
     exit;

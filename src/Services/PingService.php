@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Fingerprint;
+use App\Services\UserService;
 use InvalidArgumentException;
 use mysqli;
 
@@ -11,14 +12,96 @@ class PingService
     public function __construct(
         private readonly mysqli $db,
         private readonly Fingerprint $fingerprint,
+        private readonly UserService $userService,
         private readonly MatchService $matchService,
         private readonly NotificationService $notificationService,
         private readonly string $pepper
-    ) {
+    ) {}
+
+    public function submitPing(int $userId, string $targetIdentifier): array
+    {
+        // Validate user exists
+        $user = $this->userService->getUserById($userId);
+        if ($user === null) {
+            throw new InvalidArgumentException('Invalid user ID.');
+        }
+
+        // Generate fingerprint for target
+        $fingerprintTarget = $this->fingerprint->fingerprint($targetIdentifier, $this->pepper);
+
+        // Get user's own fingerprint from contact_hash
+        $userFingerprint = $user['contact_hash'];
+
+        if ($userFingerprint === $fingerprintTarget) {
+            throw new InvalidArgumentException('Cannot ping yourself.');
+        }
+
+        // Store ping with user_id
+        $insert = $this->db->prepare(
+            'INSERT INTO pings (user_id, self_name, fingerprint_self, fingerprint_target, created_at)
+             VALUES (?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE created_at = NOW()'
+        );
+        $selfName = 'User'; // Default name, can be enhanced later
+        $insert->bind_param('isss', $userId, $selfName, $userFingerprint, $fingerprintTarget);
+        $insert->execute();
+        $insert->close();
+
+        // Check for reverse ping (match detection)
+        $reverse = $this->db->prepare(
+            'SELECT p.user_id, u.contact_encrypted FROM pings p 
+             JOIN users u ON p.user_id = u.id
+             WHERE p.fingerprint_self = ? AND p.fingerprint_target = ? LIMIT 1'
+        );
+        $reverse->bind_param('ss', $fingerprintTarget, $userFingerprint);
+        $reverse->execute();
+        $reverseFound = $reverse->get_result()->fetch_assoc();
+        $reverse->close();
+
+        if ($reverseFound === null) {
+            return [
+                'accepted' => true,
+                'matched' => false,
+                'message' => 'Ping recorded.',
+            ];
+        }
+
+        // Create match with user IDs
+        $matchResult = $this->matchService->createOrGetMatch(
+            $userFingerprint,
+            $fingerprintTarget,
+            $userId,
+            (int) $reverseFound['user_id']
+        );
+
+        if ($matchResult['created'] === true) {
+            // Get contact information for notifications
+            $userContact = $this->userService->getUserContact($userId);
+            $targetUserId = (int) $reverseFound['user_id'];
+            $targetContact = $this->userService->getUserContact($targetUserId);
+
+            if ($targetContact === null) {
+                $targetContact = 'the other person';
+            }
+
+            $this->notificationService->sendPreferencePrompt(
+                $userContact,
+                $targetContact,
+                'the other person',
+                'User'
+            );
+        }
+
+        return [
+            'accepted' => true,
+            'matched' => true,
+            'message' => 'Mutual openness detected.',
+        ];
     }
 
-    public function submitPing(string $selfName, string $selfIdentifier, string $targetIdentifier): array
+    public function submitPingLegacy(string $selfName, string $selfIdentifier, string $targetIdentifier): array
     {
+        // Legacy method for backward compatibility
         $normalizedName = $this->normalizeName($selfName);
         if ($normalizedName === '') {
             throw new InvalidArgumentException('Your name is required.');
@@ -32,11 +115,12 @@ class PingService
         }
 
         $insert = $this->db->prepare(
-            'INSERT INTO pings (self_name, fingerprint_self, fingerprint_target, created_at)
-             VALUES (?, ?, ?, NOW())
+            'INSERT INTO pings (user_id, self_name, fingerprint_self, fingerprint_target, created_at)
+             VALUES (?, ?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE self_name = VALUES(self_name), created_at = NOW()'
         );
-        $insert->bind_param('sss', $normalizedName, $fingerprintSelf, $fingerprintTarget);
+        $nullUserId = null;
+        $insert->bind_param('isss', $nullUserId, $normalizedName, $fingerprintSelf, $fingerprintTarget);
         $insert->execute();
         $insert->close();
 

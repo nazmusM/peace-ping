@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Fingerprint;
+use App\Services\UserService;
 use InvalidArgumentException;
 use mysqli;
 
@@ -13,14 +14,107 @@ class PreferenceService
     public function __construct(
         private readonly mysqli $db,
         private readonly Fingerprint $fingerprint,
+        private readonly UserService $userService,
         private readonly MatchService $matchService,
         private readonly NotificationService $notificationService,
         private readonly string $pepper
-    ) {
+    ) {}
+
+    public function submitPreference(int $userId, string $targetIdentifier, string $preference): array
+    {
+        $normalizedPreference = trim(strtolower($preference));
+        if (!in_array($normalizedPreference, self::VALID_PREFERENCES, true)) {
+            throw new InvalidArgumentException('Invalid preference value.');
+        }
+
+        // Validate user exists
+        $user = $this->userService->getUserById($userId);
+        if ($user === null) {
+            throw new InvalidArgumentException('Invalid user ID.');
+        }
+
+        // Generate fingerprint for target
+        $targetFingerprint = $this->fingerprint->fingerprint($targetIdentifier, $this->pepper);
+        $userFingerprint = $user['contact_hash'];
+
+        if ($userFingerprint === $targetFingerprint) {
+            throw new InvalidArgumentException('Cannot submit preference for yourself.');
+        }
+
+        $match = $this->matchService->getMatchByFingerprints($userFingerprint, $targetFingerprint);
+        if ($match === null) {
+            throw new InvalidArgumentException('No mutual match found yet.');
+        }
+
+        if ((string) $match['status'] === 'resolved') {
+            return [
+                'resolved' => true,
+                'message' => 'Mutual openness has already been confirmed for this match.',
+            ];
+        }
+
+        $matchId = (int) $match['id'];
+
+        // Store preference with user_id
+        $upsert = $this->db->prepare(
+            "INSERT INTO preferences (match_id, user_id, fingerprint, preference, created_at)
+             VALUES (?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE preference = VALUES(preference), created_at = NOW()"
+        );
+        $upsert->bind_param('iiss', $matchId, $userId, $userFingerprint, $normalizedPreference);
+        $upsert->execute();
+        $upsert->close();
+
+        // Check if both preferences are submitted
+        $select = $this->db->prepare(
+            'SELECT user_id, fingerprint, preference FROM preferences WHERE match_id = ? ORDER BY id ASC'
+        );
+        $select->bind_param('i', $matchId);
+        $select->execute();
+        $result = $select->get_result();
+        $preferences = [];
+        while ($row = $result->fetch_assoc()) {
+            $preferences[] = $row;
+        }
+        $select->close();
+
+        if (count($preferences) < 2) {
+            return [
+                'resolved' => false,
+                'message' => 'Preference recorded. Waiting for the other person.',
+            ];
+        }
+
+        // Get contact information for notifications
+        $userContact = $this->userService->getUserContact($userId);
+        $targetUser = $this->userService->findUserByFingerprint($targetFingerprint);
+        $targetContact = null;
+
+        if ($targetUser !== null) {
+            $targetContact = $this->userService->getUserContact((int) $targetUser['id']);
+        }
+
+        $message = $this->buildResolutionMessage($preferences[0]['preference'], $preferences[1]['preference']);
+
+        if ($userContact && $targetContact) {
+            $this->notificationService->sendFinalPermissionMessage($userContact, $targetContact, $message);
+        }
+
+        $this->matchService->markResolved($matchId);
+
+        return [
+            'resolved' => true,
+            'message' => $message,
+            'contacts' => [
+                'your_contact' => $userContact,
+                'other_contact' => $targetContact
+            ]
+        ];
     }
 
-    public function submitPreference(string $selfIdentifier, string $targetIdentifier, string $preference): array
+    public function submitPreferenceLegacy(string $selfIdentifier, string $targetIdentifier, string $preference): array
     {
+        // Legacy method for backward compatibility
         $normalizedPreference = trim(strtolower($preference));
         if (!in_array($normalizedPreference, self::VALID_PREFERENCES, true)) {
             throw new InvalidArgumentException('Invalid preference value.');
@@ -49,6 +143,7 @@ class PreferenceService
              VALUES (?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE preference = VALUES(preference), created_at = NOW()"
         );
+        $nullUserId = null;
         $upsert->bind_param('iss', $matchId, $selfFingerprint, $normalizedPreference);
         $upsert->execute();
         $upsert->close();
@@ -68,7 +163,7 @@ class PreferenceService
         if (count($preferences) < 2) {
             return [
                 'resolved' => false,
-                'message' => 'Preference recorded. Waiting for the other person.',
+                'message' => 'Preference recorded. Waiting for other person.',
             ];
         }
 

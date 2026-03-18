@@ -35,6 +35,7 @@ class Fingerprint
             throw new InvalidArgumentException('Identifier must be a valid email or phone value.');
         }
 
-        return hash('sha256', $normalized . $pepper);
+        // Use HMAC-SHA256 for fingerprint generation as required
+        return hash_hmac('sha256', $normalized, $pepper);
     }
 }

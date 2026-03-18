@@ -22,6 +22,25 @@ const statusForm = document.getElementById("status-form");
 const preferenceForm = document.getElementById("preference-form");
 const preferenceCard = document.getElementById("preference-card");
 
+// Store current user ID after registration
+let currentUserId = null;
+
+// User registration function
+async function registerUser(contact) {
+    showResult(document.getElementById("ping-result"), "Registering user...", null);
+    
+    const response = await postJson("api/register", { contact });
+    
+    if (!response.ok) {
+        const err = response.body.error || "Registration failed.";
+        showResult(document.getElementById("ping-result"), err, "warn");
+        return null;
+    }
+    
+    currentUserId = response.body.user_id;
+    return currentUserId;
+}
+
 pingForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
@@ -30,8 +49,21 @@ pingForm.addEventListener("submit", async (event) => {
     const self = document.getElementById("ping-self").value.trim();
     const target = document.getElementById("ping-target").value.trim();
 
+    // Register user first (or get existing user ID)
+    const userId = await registerUser(self);
+    if (!userId) {
+        return;
+    }
+
     showResult(resultEl, "Submitting ping...", null);
-    const response = await postJson("api/ping", { self_name: selfName, self, target });
+    
+    // Try new API format first
+    let response = await postJson("api/ping", { user_id: userId, target });
+    
+    // If new format fails, fall back to legacy format
+    if (!response.ok && response.status === 400) {
+        response = await postJson("api/ping", { self_name: selfName, self, target });
+    }
 
     if (!response.ok) {
         const err = response.body.error || "Could not submit ping.";
@@ -89,11 +121,26 @@ preferenceForm.addEventListener("submit", async (event) => {
     const preference = document.getElementById("preference-choice").value;
 
     showResult(resultEl, "Submitting preference...", null);
-    const response = await postJson("api/preference", {
-        self,
-        target,
-        preference
-    });
+    
+    // Try to register user for new API format
+    let userId = await registerUser(self);
+    
+    // Try new API format first if we have a user ID
+    let response;
+    if (userId) {
+        response = await postJson("api/preference", {
+            user_id: userId,
+            target,
+            preference
+        });
+    } else {
+        // Fall back to legacy format
+        response = await postJson("api/preference", {
+            self,
+            target,
+            preference
+        });
+    }
 
     if (!response.ok) {
         const err = response.body.error || "Could not submit preference.";
@@ -102,7 +149,17 @@ preferenceForm.addEventListener("submit", async (event) => {
     }
 
     if (response.body.resolved) {
-        showResult(resultEl, response.body.message, "ok");
+        let message = response.body.message;
+        
+        // Show contact information if available
+        if (response.body.contacts) {
+            const { your_contact, other_contact } = response.body.contacts;
+            if (your_contact && other_contact) {
+                message += `\n\nYour contact: ${your_contact}\nTheir contact: ${other_contact}`;
+            }
+        }
+        
+        showResult(resultEl, message, "ok");
         return;
     }
 
