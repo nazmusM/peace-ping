@@ -272,7 +272,7 @@ if ($path === '/register') {
             <div class="container">
                 <section class="page-header">
                     <h1>Create Your Peace Ping Account</h1>
-                    <p>Register with your UK mobile number to start reconnecting</p>
+                    <p>Register with your mobile number to start reconnecting</p>
                 </section>
 
                 <section class="grid">
@@ -450,6 +450,7 @@ if ($path === '/ping') {
                     <li><a href="/">Home</a></li>
                     <li><a href="/how-it-works">How It Works</a></li>
                     <li><a href="/ping" class="active">Send Ping</a></li>
+                    <li><a href="/register">Register</a></li>
                     <li><a href="/contact">Contact</a></li>
                 </ul>
             </nav>
@@ -567,6 +568,7 @@ if ($path === '/contact') {
                     <li><a href="/">Home</a></li>
                     <li><a href="/how-it-works">How It Works</a></li>
                     <li><a href="/ping">Send Ping</a></li>
+                    <li><a href="/register">Register</a></li>
                     <li><a href="/contact" class="active">Contact</a></li>
                 </ul>
             </nav>

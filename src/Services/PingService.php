@@ -20,13 +20,13 @@ class PingService
 
     public function submitPing(int $userId, string $targetIdentifier): array
     {
-        // Get user fingerprint
-        $user = $this->userService->getUserById($userId);
-        if ($user === null) {
-            throw new InvalidArgumentException('User not found.');
+        // Get user contact
+        $userContact = $this->userService->getUserContact($userId);
+        if ($userContact === null) {
+            throw new InvalidArgumentException('User contact not found.');
         }
 
-        $userFingerprint = $this->fingerprint->fingerprint($user['contact_hash'], $this->pepper);
+        $userFingerprint = $this->fingerprint->fingerprint($userContact, $this->pepper);
 
         // Validate target identifier
         $normalizedTarget = $this->fingerprint->normalize($targetIdentifier);
@@ -150,11 +150,11 @@ class PingService
             if ($otherNameForSelf === '') {
                 $otherNameForSelf = 'the other person';
             }
+            // For legacy method, just send a simple notification
             $this->notificationService->sendPreferencePrompt(
-                $selfIdentifier,
-                $targetIdentifier,
-                $otherNameForSelf,
-                $normalizedName
+                $fingerprintSelf,
+                $fingerprintTarget,
+                [$selfIdentifier, $targetIdentifier]
             );
         }
 

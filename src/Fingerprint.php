@@ -17,24 +17,22 @@ class Fingerprint
             return false;
         }
 
-        // UK phone number validation - England only
-        return $this->validateUKPhone($identifier);
+        // Phone number validation
+        return $this->validatePhone($identifier);
     }
 
-    private function validateUKPhone(string $phone): bool
+    private function validatePhone(string $phone): bool
     {
-        // Remove spaces, parentheses, hyphens
-        $cleaned = preg_replace('/[\s\-\(\)]/', '', $phone);
+        $cleaned = preg_replace('/[^\d\+]/', '', $phone);
 
-        // UK mobile numbers: 07xxx xxxxxx or +447xx xxxxxx
-        // UK landline: 01xxx xxxxxx, 02xxx xxxxxx, +441xxx xxxxxx, +442xxx xxxxxx
+        // Phone patterns (currently UK-focused but can be extended)
         $patterns = [
-            '/^07[0-9]{9}$/',           // Mobile: 07xxxxxxxxx
-            '/^\+447[0-9]{9}$/',        // Mobile: +447xxxxxxxxx
-            '/^01[0-9]{8,9}$/',         // Landline: 01xxxxxxxxx
-            '/^02[0-9]{8,9}$/',         // Landline: 02xxxxxxxxx
-            '/^\+441[0-9]{8,9}$/',      // Landline: +441xxxxxxxxx
-            '/^\+442[0-9]{8,9}$/',      // Landline: +442xxxxxxxxx
+            '/^07[0-9]{9}$/',           // 07xxx xxxxxx
+            '/^\+447[0-9]{9}$/',       // +447xx xxxxxx
+            '/^01[0-9]{9}$/',           // 01xxx xxxxxx
+            '/^02[0-9]{9}$/',           // 02xxx xxxxxx
+            '/^03[0-9]{9}$/',           // 03xxx xxxxxx
+            '/^\+44[12][0-9]{9}$/',     // +441xxx, +442xxx, +443xxx
         ];
 
         foreach ($patterns as $pattern) {
@@ -46,7 +44,7 @@ class Fingerprint
         return false;
     }
 
-    public function formatUKPhone(string $phone): string
+    public function formatPhone(string $phone): string
     {
         // Remove all non-numeric characters except +
         $cleaned = preg_replace('/[^\d\+]/', '', $phone);
