@@ -1,15 +1,35 @@
 -- Account-Based Architecture Migration for Peace Ping
 -- Idempotent migration - checks before creating/modifying
 
--- Create users table if not exists
+-- Create new users table
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
     contact_encrypted TEXT NOT NULL,
     contact_hash CHAR(64) NOT NULL UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_users_contact_hash (contact_hash),
     INDEX idx_users_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add name column to users table if it doesn't exist (for existing tables)
+SET @dbname = DATABASE();
+SET @tablename = 'users';
+SET @columnname = 'name';
+SET @preparedStatement = (SELECT IF(
+  (
+    SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE
+      (table_schema = @dbname)
+      AND (table_name = @tablename)
+      AND (column_name = @columnname)
+  ) > 0,
+  'SELECT 1',
+  CONCAT('ALTER TABLE ', @tablename, ' ADD COLUMN ', @columnname, ' VARCHAR(120) NOT NULL AFTER id;')
+));
+PREPARE alterIfNotExists FROM @preparedStatement;
+EXECUTE alterIfNotExists;
+DEALLOCATE PREPARE alterIfNotExists;
 
 -- Add user_id to pings if not exists
 SET @dbname = DATABASE();

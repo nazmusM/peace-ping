@@ -20,30 +20,29 @@ class PingService
 
     public function submitPing(int $userId, string $targetIdentifier): array
     {
-        // Validate user exists
+        // Get user fingerprint
         $user = $this->userService->getUserById($userId);
         if ($user === null) {
-            throw new InvalidArgumentException('Invalid user ID.');
+            throw new InvalidArgumentException('User not found.');
         }
 
-        // Generate fingerprint for target
-        $fingerprintTarget = $this->fingerprint->fingerprint($targetIdentifier, $this->pepper);
+        $userFingerprint = $this->fingerprint->fingerprint($user['contact_hash'], $this->pepper);
 
-        // Get user's own fingerprint from contact_hash
-        $userFingerprint = $user['contact_hash'];
-
-        if ($userFingerprint === $fingerprintTarget) {
-            throw new InvalidArgumentException('Cannot ping yourself.');
+        // Validate target identifier
+        $normalizedTarget = $this->fingerprint->normalize($targetIdentifier);
+        if (!$this->fingerprint->validateIdentifier($normalizedTarget)) {
+            throw new InvalidArgumentException('Invalid target identifier format.');
         }
 
-        // Store ping with user_id
+        $fingerprintTarget = $this->fingerprint->fingerprint($normalizedTarget, $this->pepper);
+
+        // Insert the ping
         $insert = $this->db->prepare(
-            'INSERT INTO pings (user_id, self_name, fingerprint_self, fingerprint_target, created_at)
-             VALUES (?, ?, ?, ?, NOW())
+            'INSERT INTO pings (user_id, fingerprint_target, created_at)
+             VALUES (?, ?, NOW())
              ON DUPLICATE KEY UPDATE created_at = NOW()'
         );
-        $selfName = 'User'; // Default name, can be enhanced later
-        $insert->bind_param('isss', $userId, $selfName, $userFingerprint, $fingerprintTarget);
+        $insert->bind_param('is', $userId, $fingerprintTarget);
         $insert->execute();
         $insert->close();
 
@@ -51,9 +50,9 @@ class PingService
         $reverse = $this->db->prepare(
             'SELECT p.user_id, u.contact_encrypted FROM pings p 
              JOIN users u ON p.user_id = u.id
-             WHERE p.fingerprint_self = ? AND p.fingerprint_target = ? LIMIT 1'
+             WHERE p.fingerprint_target = ? AND p.user_id != ? LIMIT 1'
         );
-        $reverse->bind_param('ss', $fingerprintTarget, $userFingerprint);
+        $reverse->bind_param('si', $userFingerprint, $userId);
         $reverse->execute();
         $reverseFound = $reverse->get_result()->fetch_assoc();
         $reverse->close();
@@ -62,7 +61,7 @@ class PingService
             return [
                 'accepted' => true,
                 'matched' => false,
-                'message' => 'Ping recorded.',
+                'message' => 'Ping recorded. If they also ping you, you\'ll both get notified!'
             ];
         }
 
@@ -80,22 +79,27 @@ class PingService
             $targetUserId = (int) $reverseFound['user_id'];
             $targetContact = $this->userService->getUserContact($targetUserId);
 
-            if ($targetContact === null) {
-                $targetContact = 'the other person';
+            // Send SMS flow-chart questions immediately when match is found
+            if ($userContact && $targetContact) {
+                // Send first question to both users
+                $question1 = "🕊️ Peace Ping: Mutual interest detected! Question 1: How would you prefer to reconnect?\nReply with: A) I'll reach out, B) They should reach out, C) Either is fine";
+
+                $this->notificationService->sendToIdentifier($targetContact, 'Peace Ping: Question 1', $question1);
+                $this->notificationService->sendToIdentifier($userContact, 'Peace Ping: Question 1', $question1);
             }
 
-            $this->notificationService->sendPreferencePrompt(
-                $userContact,
-                $targetContact,
-                'the other person',
-                'User'
-            );
+            // Mark match as resolved since we're sending questions immediately
+            $this->matchService->markResolved($matchResult['id']);
         }
 
         return [
             'accepted' => true,
             'matched' => true,
-            'message' => 'Mutual openness detected.',
+            'message' => 'Mutual match detected! Both of you will receive SMS notifications.',
+            'contacts' => [
+                'your_contact' => $userContact,
+                'other_contact' => $targetContact
+            ]
         ];
     }
 

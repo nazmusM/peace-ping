@@ -14,8 +14,7 @@ class PingController
     public function __construct(
         private readonly PingService $pingService,
         private readonly RateLimiter $rateLimiter
-    ) {
-    }
+    ) {}
 
     public function handle(string $ipAddress): void
     {
@@ -23,16 +22,25 @@ class PingController
             $this->rateLimiter->enforcePingLimit($ipAddress);
             $payload = $this->decodeJsonBody();
 
-            if (!isset($payload['self_name'], $payload['self'], $payload['target'])) {
-                Response::json(['error' => 'Missing required fields: self_name, self, target.'], 400);
+            // Support both old format (legacy) and new format (user_id)
+            if (isset($payload['user_id'], $payload['target'])) {
+                // New format with user_id
+                $result = $this->pingService->submitPing(
+                    (int) $payload['user_id'],
+                    (string) $payload['target']
+                );
+            } elseif (isset($payload['self_name'], $payload['self'], $payload['target'])) {
+                // Legacy format
+                $result = $this->pingService->submitPingLegacy(
+                    (string) $payload['self_name'],
+                    (string) $payload['self'],
+                    (string) $payload['target']
+                );
+            } else {
+                Response::json(['error' => 'Missing required fields: user_id and target, or self_name, self, and target.'], 400);
                 return;
             }
 
-            $result = $this->pingService->submitPing(
-                (string) $payload['self_name'],
-                (string) $payload['self'],
-                (string) $payload['target']
-            );
             Response::json($result, 200);
         } catch (InvalidArgumentException $exception) {
             Response::json(['error' => $exception->getMessage()], 422);

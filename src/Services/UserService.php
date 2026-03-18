@@ -14,49 +14,133 @@ class UserService
         private readonly Fingerprint $fingerprint,
         private readonly Encryption $encryption,
         private readonly string $pepper
-    ) {
-    }
+    ) {}
 
     /**
      * Register a new user with encrypted contact information
      */
-    public function registerUser(string $contact): array
+    public function register(string $name, string $phone): array
     {
-        $normalizedContact = $this->fingerprint->normalize($contact);
-        if (!$this->fingerprint->validateIdentifier($normalizedContact)) {
-            throw new InvalidArgumentException('Contact must be a valid email or phone number.');
+        if ($name === '' || strlen($name) > 120) {
+            throw new InvalidArgumentException('Name is required and must be 120 characters or less.');
         }
 
-        // Generate contact hash using HMAC-SHA256
-        $contactHash = hash_hmac('sha256', $normalizedContact, $this->pepper);
+        $normalizedPhone = $this->fingerprint->normalize($phone);
+        if (!$this->fingerprint->validateIdentifier($normalizedPhone)) {
+            throw new InvalidArgumentException('Invalid mobile number format.');
+        }
+
+        // Generate verification code (6 digits)
+        $verificationCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        // Store in temporary registration table (or session)
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $_SESSION['pending_registration'] = [
+            'name' => $name,
+            'phone' => $normalizedPhone,
+            'verification_code' => $verificationCode,
+            'created_at' => time()
+        ];
+
+        // TODO: Send SMS with verification code
+        // For now, just return the code for testing
+        return [
+            'verification_code' => $verificationCode,
+            'message' => 'Verification code sent to your mobile number.'
+        ];
+    }
+
+    public function verifyAndCreate(string $code): array
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+
+        if (!isset($_SESSION['pending_registration'])) {
+            throw new InvalidArgumentException('No pending registration found.');
+        }
+
+        $pending = $_SESSION['pending_registration'];
+
+        // Check if code is expired (10 minutes)
+        if (time() - $pending['created_at'] > 600) {
+            unset($_SESSION['pending_registration']);
+            throw new InvalidArgumentException('Verification code expired. Please register again.');
+        }
+
+        if ($pending['verification_code'] !== $code) {
+            throw new InvalidArgumentException('Invalid verification code.');
+        }
 
         // Check if user already exists
-        $existingUser = $this->getUserByContactHash($contactHash);
+        $fingerprint = $this->fingerprint->fingerprint($pending['phone'], $this->pepper);
+        $existingUser = $this->getUserByContactHash($fingerprint);
+
         if ($existingUser !== null) {
+            // User exists, just log them in
+            $_SESSION['user_id'] = $existingUser['id'];
+            $_SESSION['user_name'] = $existingUser['name'] ?? $pending['name'];
+            unset($_SESSION['pending_registration']);
+
             return [
-                'user_id' => (int) $existingUser['id'],
-                'created' => false,
-                'message' => 'User already exists.'
+                'user_id' => $existingUser['id'],
+                'message' => 'Login successful.'
             ];
         }
 
-        // Encrypt contact information
-        $encryptedContact = $this->encryption->encrypt($normalizedContact);
-
-        // Insert new user
+        // Create new user
+        $encryptedPhone = $this->encryption->encrypt($pending['phone']);
         $insert = $this->db->prepare(
-            'INSERT INTO users (contact_encrypted, contact_hash) VALUES (?, ?)'
+            'INSERT INTO users (name, contact_encrypted, contact_hash, created_at) VALUES (?, ?, ?, NOW())'
         );
-        $insert->bind_param('ss', $encryptedContact, $contactHash);
+        $insert->bind_param('sss', $pending['name'], $encryptedPhone, $fingerprint);
         $insert->execute();
-        $userId = (int) $this->db->insert_id;
         $insert->close();
+
+        $userId = $this->db->insert_id;
+
+        // Log user in
+        $_SESSION['user_id'] = $userId;
+        $_SESSION['user_name'] = $pending['name'];
+        unset($_SESSION['pending_registration']);
 
         return [
             'user_id' => $userId,
-            'created' => true,
-            'message' => 'User registered successfully.'
+            'message' => 'Registration successful.'
         ];
+    }
+
+    public function isLoggedIn(): bool
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        return isset($_SESSION['user_id']);
+    }
+
+    public function getCurrentUser(): ?array
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        if (!isset($_SESSION['user_id'])) {
+            return null;
+        }
+
+        return [
+            'id' => $_SESSION['user_id'],
+            'name' => $_SESSION['user_name'] ?? ''
+        ];
+    }
+
+    public function logout(): void
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        session_destroy();
     }
 
     /**
@@ -65,7 +149,7 @@ class UserService
     public function getUserByContactHash(string $contactHash): ?array
     {
         $select = $this->db->prepare(
-            'SELECT id, contact_encrypted, contact_hash, created_at FROM users WHERE contact_hash = ? LIMIT 1'
+            'SELECT id, name, contact_encrypted, contact_hash, created_at FROM users WHERE contact_hash = ? LIMIT 1'
         );
         $select->bind_param('s', $contactHash);
         $select->execute();
@@ -81,7 +165,7 @@ class UserService
     public function getUserById(int $userId): ?array
     {
         $select = $this->db->prepare(
-            'SELECT id, contact_encrypted, contact_hash, created_at FROM users WHERE id = ? LIMIT 1'
+            'SELECT id, name, contact_encrypted, contact_hash, created_at FROM users WHERE id = ? LIMIT 1'
         );
         $select->bind_param('i', $userId);
         $select->execute();

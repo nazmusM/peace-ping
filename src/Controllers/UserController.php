@@ -5,12 +5,11 @@ namespace App\Controllers;
 use App\Services\UserService;
 use App\Utils\Response;
 use InvalidArgumentException;
+use Exception;
 
 class UserController
 {
-    public function __construct(private readonly UserService $userService)
-    {
-    }
+    public function __construct(private readonly UserService $userService) {}
 
     /**
      * Handle user registration request
@@ -25,28 +24,26 @@ class UserController
     {
         header('Content-Type: application/json; charset=utf-8');
 
+        $input = json_decode(file_get_contents('php://input'), true);
+        $action = $input['action'] ?? '';
+
         try {
-            $input = $this->getJsonInput();
-            
-            if (!isset($input['contact']) || !is_string($input['contact'])) {
-                Response::json(['error' => 'Contact information is required.'], 400);
-                return;
+            switch ($action) {
+                case 'register':
+                    $this->handleRegister($input);
+                    break;
+                case 'verify':
+                    $this->handleVerify($input);
+                    break;
+                case 'status':
+                    $this->handleStatus();
+                    break;
+                case 'logout':
+                    $this->handleLogout();
+                    break;
+                default:
+                    Response::json(['error' => 'Invalid action.'], 400);
             }
-
-            $contact = trim($input['contact']);
-            if ($contact === '') {
-                Response::json(['error' => 'Contact information cannot be empty.'], 400);
-                return;
-            }
-
-            $result = $this->userService->registerUser($contact);
-
-            Response::json([
-                'user_id' => $result['user_id'],
-                'created' => $result['created'],
-                'message' => $result['message']
-            ]);
-
         } catch (InvalidArgumentException $e) {
             Response::json(['error' => $e->getMessage()], 400);
         } catch (\Exception $e) {
@@ -55,25 +52,61 @@ class UserController
         }
     }
 
+    private function handleRegister(array $input): void
+    {
+        $name = trim($input['name'] ?? '');
+        $phone = trim($input['phone'] ?? '');
+
+        if ($name === '' || $phone === '') {
+            Response::json(['error' => 'Name and phone number are required.'], 400);
+            return;
+        }
+
+        $result = $this->userService->register($name, $phone);
+        Response::json($result);
+    }
+
+    private function handleVerify(array $input): void
+    {
+        $code = trim($input['code'] ?? '');
+
+        if ($code === '') {
+            Response::json(['error' => 'Verification code is required.'], 400);
+            return;
+        }
+
+        try {
+            $result = $this->userService->verifyAndCreate($code);
+            Response::json($result);
+        } catch (Exception $e) {
+            error_log('Verification error: ' . $e->getMessage());
+            Response::json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    private function handleStatus(): void
+    {
+        $isLoggedIn = $this->userService->isLoggedIn();
+        $user = $this->userService->getCurrentUser();
+
+        Response::json([
+            'logged_in' => $isLoggedIn,
+            'user' => $user
+        ]);
+    }
+
+    private function handleLogout(): void
+    {
+        $this->userService->logout();
+        Response::json(['message' => 'Logged out successfully.']);
+    }
+
     /**
      * Parse JSON input from request body
      */
-    private function getJsonInput(): array
+    private function parseInput(): array
     {
-        $input = file_get_contents('php://input');
-        if ($input === false) {
-            throw new InvalidArgumentException('Invalid request body.');
-        }
-
-        $decoded = json_decode($input, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new InvalidArgumentException('Invalid JSON format.');
-        }
-
-        if (!is_array($decoded)) {
-            throw new InvalidArgumentException('Invalid request format.');
-        }
-
-        return $decoded;
+        $input = json_decode(file_get_contents('php://input'), true);
+        return $input ?? [];
     }
 }

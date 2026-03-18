@@ -9,8 +9,7 @@ class NotificationService
     public function __construct(
         private readonly string $emailFrom,
         private readonly string $smsWebhookUrl
-    ) {
-    }
+    ) {}
 
     public function sendPreferencePrompt(
         string $identifierA,
@@ -31,20 +30,41 @@ class NotificationService
         $this->sendToIdentifier($identifierB, 'Peace Ping: Mutual Openness Confirmed', $message);
     }
 
-    private function sendToIdentifier(string $identifier, string $subject, string $message): void
+    public function sendToIdentifier(string $identifier, string $subject, string $message): void
     {
         $normalized = strtolower(trim($identifier));
-        if (filter_var($normalized, FILTER_VALIDATE_EMAIL) !== false) {
-            $this->sendEmail($normalized, $subject, $message);
-            return;
-        }
 
-        if ($this->looksLikePhone($normalized)) {
+        // Only UK phone numbers supported
+        if ($this->looksLikeUKPhone($normalized)) {
             $this->sendSms($normalized, $message);
             return;
         }
 
-        throw new RuntimeException('Unsupported identifier format for outbound notification.');
+        throw new RuntimeException('UK phone number required for notifications.');
+    }
+
+    private function looksLikeUKPhone(string $identifier): bool
+    {
+        // Remove spaces, parentheses, hyphens
+        $cleaned = preg_replace('/[\s\-\(\)]/', '', $identifier);
+
+        // UK phone patterns
+        $patterns = [
+            '/^07[0-9]{9}$/',           // Mobile: 07xxxxxxxxx
+            '/^\+447[0-9]{9}$/',        // Mobile: +447xxxxxxxxx
+            '/^01[0-9]{8,9}$/',         // Landline: 01xxxxxxxxx
+            '/^02[0-9]{8,9}$/',         // Landline: 02xxxxxxxxx
+            '/^\+441[0-9]{8,9}$/',      // Landline: +441xxxxxxxxx
+            '/^\+442[0-9]{8,9}$/',      // Landline: +442xxxxxxxxx
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $cleaned)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function sendEmail(string $to, string $subject, string $message): void

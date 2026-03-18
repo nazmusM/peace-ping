@@ -12,6 +12,7 @@ return [
 
     'security' => [
         'pepper' => getenv('PEACEPING_PEPPER') ?: '',
+        'encryption_key' => getenv('PEACEPING_ENCRYPTION_KEY') ?: '',
     ],
 
     'notifications' => [
@@ -20,6 +21,6 @@ return [
     ],
 
     'rate_limit' => [
-        'max_pings_per_hour' => 5,
+        'max_pings_per_hour' => 20, // Increased for testing
     ],
 ];
