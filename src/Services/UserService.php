@@ -13,6 +13,7 @@ class UserService
         private readonly mysqli $db,
         private readonly Fingerprint $fingerprint,
         private readonly Encryption $encryption,
+        private readonly NotificationService $notificationService,
         private readonly string $pepper
     ) {}
 
@@ -21,17 +22,33 @@ class UserService
      */
     public function register(string $name, string $phone): array
     {
-        if ($name === '' || strlen($name) > 120) {
-            throw new InvalidArgumentException('Name is required and must be 120 characters or less.');
+        // Validate name
+        if (empty(trim($name))) {
+            throw new InvalidArgumentException('Name is required.');
+        }
+        if (strlen($name) > 120) {
+            throw new InvalidArgumentException('Name must be less than 120 characters.');
+        }
+        if (!preg_match('/^[a-zA-Z\s\-\'\.]+$/', $name)) {
+            throw new InvalidArgumentException('Name can only contain letters, spaces, hyphens, apostrophes, and periods.');
         }
 
-        $normalizedPhone = $this->fingerprint->normalize($phone);
+        // Validate phone
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
         if (!$this->fingerprint->validateIdentifier($normalizedPhone)) {
-            throw new InvalidArgumentException('Invalid mobile number format.');
+            throw new InvalidArgumentException('Invalid phone number format. Please use: 07xxx xxxxxx or +447xx xxxxxx');
         }
 
-        // Generate verification code (6 digits)
-        $verificationCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        // Check if phone already registered
+        $existingUser = $this->getUserByContactHash(
+            $this->fingerprint->fingerprint($normalizedPhone, $this->pepper)
+        );
+        if ($existingUser !== null) {
+            throw new InvalidArgumentException('This phone number is already registered. Please try logging in.');
+        }
+
+        // Generate verification code
+        $verificationCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
 
         // Store in temporary registration table (or session)
         if (session_status() === PHP_SESSION_NONE) {
@@ -44,8 +61,9 @@ class UserService
             'created_at' => time()
         ];
 
-        // TODO: Send SMS with verification code
-        // For now, just return the code for testing
+        // Send SMS with verification code
+        $this->notificationService->sendVerificationCode($normalizedPhone, $verificationCode);
+
         return [
             'verification_code' => $verificationCode,
             'message' => 'Verification code sent to your mobile number.'

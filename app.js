@@ -10,11 +10,42 @@ async function postJson(url, payload) {
 }
 
 function showResult(target, text, tone) {
+    if (!text || text.trim() === '') {
+        target.style.display = 'none';
+        return;
+    }
+
+    target.style.display = 'block';
     target.textContent = text;
     target.classList.remove("ok", "warn");
     if (tone) {
         target.classList.add(tone);
     }
+
+    // Scroll to result for better UX on mobile
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Form validation helpers
+function validatePhone(phone) {
+    const cleaned = phone.replace(/[^\d\+]/g, '');
+    return /^07[0-9]{9}$/.test(cleaned) || /^\+447[0-9]{9}$/.test(cleaned);
+}
+
+function validateName(name) {
+    return /^[a-zA-Z\s\-\'\.]+$/.test(name) && name.trim().length >= 2;
 }
 
 const pingForm = document.getElementById("ping-form");
@@ -23,14 +54,35 @@ const matchMessage = document.getElementById("match-message");
 const contactInfo = document.getElementById("contact-info");
 const contactDetails = document.getElementById("contact-details");
 
-// User registration function (no longer needed for ping page)
-// Users must be logged in via session to send pings
+// Add input validation for phone field
+const phoneInput = document.getElementById("ping-target");
+if (phoneInput) {
+    phoneInput.addEventListener('input', debounce(function (e) {
+        const value = e.target.value;
+        if (value && !validatePhone(value)) {
+            e.target.setCustomValidity('Please enter a valid UK mobile number (07xxx xxxxxx or +447xx xxxxxx)');
+        } else {
+            e.target.setCustomValidity('');
+        }
+    }, 300));
+}
 
 pingForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const resultEl = document.getElementById("ping-result");
     const target = document.getElementById("ping-target").value.trim();
+
+    // Client-side validation
+    if (!target) {
+        showResult(resultEl, "Please enter a phone number.", "warn");
+        return;
+    }
+
+    if (!validatePhone(target)) {
+        showResult(resultEl, "Please enter a valid UK mobile number (07xxx xxxxxx or +447xx xxxxxx)", "warn");
+        return;
+    }
 
     // Hide previous match info
     matchInfo.hidden = true;

@@ -15,13 +15,47 @@ use App\Utils\Response;
 
 require_once __DIR__ . '/src/bootstrap.php';
 
+// Enable error reporting for production debugging
+ini_set('display_errors', 1);
+ini_set('log_errors', 1);
+error_reporting(E_ALL);
+
+// Custom error handler for production
+set_error_handler(function ($severity, $message, $file, $line) {
+    // Only log errors, not display in production
+    $errorTypes = [
+        E_ERROR => 'Fatal Error',
+        E_WARNING => 'Warning',
+        E_PARSE => 'Parse Error',
+        E_NOTICE => 'Notice'
+    ];
+
+    $errorType = $errorTypes[$severity] ?? 'Unknown';
+
+    // Log to error file
+    $logMessage = sprintf(
+        "[%s] %s: %s in %s on line %d",
+        date('Y-m-d H:i:s'),
+        $errorType,
+        $message,
+        $file,
+        $line,
+        $_SERVER['REQUEST_METHOD'] . ' ' . $_SERVER['REQUEST_URI']
+    );
+
+    file_put_contents(__DIR__ . '/error_log.txt', $logMessage, FILE_APPEND);
+
+    // Don't display errors in production
+    return false;
+});
+
 $db = Database::getConnection($config['db']);
 $fingerprint = new Fingerprint();
 $encryption = new Encryption($config['security']['encryption_key'] ?? '');
-$userService = new UserService($db, $fingerprint, $encryption, $config['security']['pepper']);
 $smsService = new SmsService($config);
 $matchService = new MatchService($db);
 $notificationService = new NotificationService($smsService, $encryption);
+$userService = new UserService($db, $fingerprint, $encryption, $notificationService, $config['security']['pepper']);
 $pingService = new PingService(
     $db,
     $fingerprint,
@@ -63,17 +97,21 @@ if ($method !== 'GET') {
 if ($path === '/' || $path === '/home') {
     // Homepage
 ?>
-    <!doctype html>
+    <!DOCTYPE html>
     <html lang="en">
 
     <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Peace Ping - Reconnect with Peace</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="Peace Ping - Reconnect with people you care about through anonymous, thoughtful communication">
+        <meta name="keywords" content="reconnect, communication, peace, anonymous, thoughtful">
+        <meta name="author" content="Peace Ping">
+        <title>Peace Ping<?php if ($page !== 'home') echo ' - ' . ucfirst($page); ?></title>
+        <link rel="stylesheet" href="/styles.css">
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
-        <link rel="stylesheet" href="styles.css?v=<?= time() ?>">
+        <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <link rel="icon" type="image/x-icon" href="/favicon.ico">
     </head>
 
     <body>
@@ -85,7 +123,7 @@ if ($path === '/' || $path === '/home') {
                 <ul class="nav-links">
                     <li><a href="/" class="active">Home</a></li>
                     <li><a href="/how-it-works">How It Works</a></li>
-                    <li><a href="/register">Register</a></li>
+                    <li><a href="/register">Register & Verify</a></li>
                     <li><a href="/ping">Send Ping</a></li>
                     <li><a href="/contact">Contact</a></li>
                 </ul>
@@ -261,7 +299,7 @@ if ($path === '/register') {
                 <ul class="nav-links">
                     <li><a href="/">Home</a></li>
                     <li><a href="/how-it-works">How It Works</a></li>
-                    <li><a href="/register" class="active">Register</a></li>
+                    <li><a href="/register" class="active">Register & Verify</a></li>
                     <li><a href="/ping">Send Ping</a></li>
                     <li><a href="/contact">Contact</a></li>
                 </ul>
@@ -342,6 +380,12 @@ if ($path === '/register') {
                     }
 
                     function showResult(target, text, tone) {
+                        if (!text || text.trim() === '') {
+                            target.style.display = 'none';
+                            return;
+                        }
+
+                        target.style.display = 'block';
                         target.textContent = text;
                         target.classList.remove("ok", "warn");
                         if (tone) {
@@ -449,8 +493,8 @@ if ($path === '/ping') {
                 <ul class="nav-links">
                     <li><a href="/">Home</a></li>
                     <li><a href="/how-it-works">How It Works</a></li>
+                    <li><a href="/register">Register & Verify</a></li>
                     <li><a href="/ping" class="active">Send Ping</a></li>
-                    <li><a href="/register">Register</a></li>
                     <li><a href="/contact">Contact</a></li>
                 </ul>
             </nav>
@@ -567,8 +611,8 @@ if ($path === '/contact') {
                 <ul class="nav-links">
                     <li><a href="/">Home</a></li>
                     <li><a href="/how-it-works">How It Works</a></li>
+                    <li><a href="/register">Register & Verify</a></li>
                     <li><a href="/ping">Send Ping</a></li>
-                    <li><a href="/register">Register</a></li>
                     <li><a href="/contact" class="active">Contact</a></li>
                 </ul>
             </nav>
