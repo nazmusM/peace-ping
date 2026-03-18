@@ -300,9 +300,9 @@ if ($path === '/register') {
                     <div class="form-group">
                         <label for="register-phone">Mobile Number</label>
                         <input type="tel" id="register-phone" name="phone" placeholder="+1234567890 or 1234567890" required>
-                        <small>International format: +[country][number] or local format: [number]. Your number is encrypted and never shared.</small>
+                        <small>International format: +1234567890 or local format: 1234567890. Your number is encrypted and never shared.</small>
                     </div>
-                    <button type="submit">Send Verification Code</button>
+                    <button type="submit" class="btn">Send Verification Code</button>
                 </form>
                 <p id="register-result" class="result" aria-live="polite"></p>
 
@@ -458,9 +458,9 @@ if ($path === '/ping') {
                     <div class="form-group">
                         <label for="ping-target">Mobile Number to Ping</label>
                         <input type="tel" id="ping-target" name="target" placeholder="+1234567890 or 1234567890" required>
-                        <small>International format: +[country][number] or local format: [number]</small>
+                        <small>International format: +1234567890 or local format: 1234567890</small>
                     </div>
-                    <button type="submit">Send Peace Ping</button>
+                    <button type="submit" class="btn">Send Peace Ping</button>
                 </form>
                 <p id="ping-result" class="result" aria-live="polite"></p>
 
