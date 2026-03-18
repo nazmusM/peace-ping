@@ -82,10 +82,10 @@ class PingService
             // Send SMS flow-chart questions immediately when match is found
             if ($userContact && $targetContact) {
                 // Send first question to both users
-                $question1 = "🕊️ Peace Ping: Mutual interest detected! Question 1: How would you prefer to reconnect?\nReply with: A) I'll reach out, B) They should reach out, C) Either is fine";
+                $question1 = "How would you prefer to reconnect?";
 
-                $this->notificationService->sendToIdentifier($targetContact, 'Peace Ping: Question 1', $question1);
-                $this->notificationService->sendToIdentifier($userContact, 'Peace Ping: Question 1', $question1);
+                $this->notificationService->sendPeacePingQuestion($targetContact, 1, $question1);
+                $this->notificationService->sendPeacePingQuestion($userContact, 1, $question1);
             }
 
             // Mark match as resolved since we're sending questions immediately

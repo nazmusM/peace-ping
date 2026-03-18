@@ -7,6 +7,7 @@ use App\Fingerprint;
 use App\Services\MatchService;
 use App\Services\NotificationService;
 use App\Services\PingService;
+use App\Services\SmsService;
 use App\Services\UserService;
 use App\Utils\Encryption;
 use App\Utils\RateLimiter;
@@ -18,11 +19,9 @@ $db = Database::getConnection($config['db']);
 $fingerprint = new Fingerprint();
 $encryption = new Encryption($config['security']['encryption_key'] ?? '');
 $userService = new UserService($db, $fingerprint, $encryption, $config['security']['pepper']);
+$smsService = new SmsService($config);
 $matchService = new MatchService($db);
-$notificationService = new NotificationService(
-    $config['notifications']['email_from'],
-    $config['notifications']['sms_webhook_url']
-);
+$notificationService = new NotificationService($smsService, $encryption);
 $pingService = new PingService(
     $db,
     $fingerprint,
