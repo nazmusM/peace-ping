@@ -36,7 +36,7 @@ class UserService
         // Validate phone
         $normalizedPhone = $this->fingerprint->formatPhone($phone);
         if (!$this->fingerprint->validateIdentifier($normalizedPhone)) {
-            throw new InvalidArgumentException('Invalid phone number format. Please use: 07xxx xxxxxx or +447xx xxxxxx');
+            throw new InvalidArgumentException('Invalid phone number format. Please use international format: +[country][number] or local format: [number]');
         }
 
         // Check if phone already registered

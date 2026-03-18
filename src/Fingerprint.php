@@ -25,14 +25,11 @@ class Fingerprint
     {
         $cleaned = preg_replace('/[^\d\+]/', '', $phone);
 
-        // Phone patterns (currently UK-focused but can be extended)
+        // Basic international phone validation
+        // Supports any country code and phone number
         $patterns = [
-            '/^07[0-9]{9}$/',           // 07xxx xxxxxx
-            '/^\+447[0-9]{9}$/',       // +447xx xxxxxx
-            '/^01[0-9]{9}$/',           // 01xxx xxxxxx
-            '/^02[0-9]{9}$/',           // 02xxx xxxxxx
-            '/^03[0-9]{9}$/',           // 03xxx xxxxxx
-            '/^\+44[12][0-9]{9}$/',     // +441xxx, +442xxx, +443xxx
+            '/^\+[1-9]\d{1,14}$/',          // International format: +[country][number], 7-15 digits total
+            '/^[1-9]\d{6,14}$/'             // Local format: [number], 7-15 digits
         ];
 
         foreach ($patterns as $pattern) {
@@ -49,9 +46,9 @@ class Fingerprint
         // Remove all non-numeric characters except +
         $cleaned = preg_replace('/[^\d\+]/', '', $phone);
 
-        // Convert to international format if not already
-        if (substr($cleaned, 0, 1) === '0' && strlen($cleaned) === 11) {
-            return '+44' . substr($cleaned, 1);
+        // If no country code, assume it's a local number
+        if (substr($cleaned, 0, 1) !== '+' && strlen($cleaned) >= 7) {
+            return '+' . $cleaned; // Convert to international format
         }
 
         return $cleaned;

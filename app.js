@@ -41,7 +41,8 @@ function debounce(func, wait) {
 // Form validation helpers
 function validatePhone(phone) {
     const cleaned = phone.replace(/[^\d\+]/g, '');
-    return /^07[0-9]{9}$/.test(cleaned) || /^\+447[0-9]{9}$/.test(cleaned);
+    // Support international format or local format
+    return /^\+[1-9]\d{1,14}$/.test(cleaned) || /^[1-9]\d{6,14}$/.test(cleaned);
 }
 
 function validateName(name) {
@@ -80,7 +81,7 @@ pingForm.addEventListener("submit", async (event) => {
     }
 
     if (!validatePhone(target)) {
-        showResult(resultEl, "Please enter a valid UK mobile number (07xxx xxxxxx or +447xx xxxxxx)", "warn");
+        showResult(resultEl, "Please enter a valid phone number (international format: +[country][number] or local format: [number])", "warn");
         return;
     }
 
@@ -112,7 +113,12 @@ pingForm.addEventListener("submit", async (event) => {
             matchInfo.hidden = false;
             matchMessage.textContent = "✨ Peace Ping Matched! Both of you will receive SMS messages with questions to help reconnect comfortably.";
 
-            showResult(resultEl, "Match found! Check your SMS for the next steps.", "ok");
+            showResult(resultEl, "🎉 Match found! Check your SMS and <a href='/matches' style='color: var(--accent); text-decoration: underline;'>view your matches</a> for details.", "ok");
+
+            // Auto-redirect to matches page after 5 seconds
+            setTimeout(() => {
+                window.location.href = '/matches';
+            }, 5000);
         } else {
             showResult(resultEl, "Peace Ping sent! If they also send you one, you'll both receive SMS questions to help reconnect.", "ok");
         }
