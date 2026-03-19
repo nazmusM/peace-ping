@@ -1,1 +1,0 @@
-[2026-03-18 08:56:30] Warning: Undefined variable $page in C:\laragon\www\peace_ping\index.php on line 109[2026-03-18 08:56:30] Warning: Undefined variable $page in C:\laragon\www\peace_ping\index.php on line 109[2026-03-18 08:56:30] Unknown: ucfirst(): Passing null to parameter #1 ($string) of type string is deprecated in C:\laragon\www\peace_ping\index.php on line 109

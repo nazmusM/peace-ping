@@ -11,47 +11,33 @@ class Fingerprint
         return strtolower(trim($identifier));
     }
 
+    /**
+     * Validate phone number (simplified)
+     */
     public function validateIdentifier(string $identifier): bool
     {
-        if ($identifier === '' || strlen($identifier) > 20) {
-            return false;
-        }
+        // Remove all non-digit characters except +
+        $clean = preg_replace('/[^0-9+]/', '', $identifier);
 
-        // Phone number validation
-        return $this->validatePhone($identifier);
+        // Simple validation: 7-15 digits, optional + prefix
+        return preg_match('/^\+?[1-9]\d{6,14}$/', $clean);
     }
 
-    private function validatePhone(string $phone): bool
-    {
-        $cleaned = preg_replace('/[^\d\+]/', '', $phone);
-
-        // Basic international phone validation
-        // Supports any country code and phone number
-        $patterns = [
-            '/^\+[1-9]\d{1,14}$/',          // International format: +[country][number], 7-15 digits total
-            '/^[1-9]\d{6,14}$/'             // Local format: [number], 7-15 digits
-        ];
-
-        foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $cleaned)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
+    /**
+     * Format phone number (simplified)
+     */
     public function formatPhone(string $phone): string
     {
-        // Remove all non-numeric characters except +
-        $cleaned = preg_replace('/[^\d\+]/', '', $phone);
+        // Remove all non-digit characters except +
+        $phone = preg_replace('/[^0-9+]/', '', $phone);
 
-        // If no country code, assume it's a local number
-        if (substr($cleaned, 0, 1) !== '+' && strlen($cleaned) >= 7) {
-            return '+' . $cleaned; // Convert to international format
+        // If no + prefix, assume it's a local number
+        if (!str_starts_with($phone, '+')) {
+            // Just return as-is for local numbers
+            return $phone;
         }
 
-        return $cleaned;
+        return $phone;
     }
 
     public function fingerprint(string $identifier, string $pepper): string
@@ -62,10 +48,10 @@ class Fingerprint
 
         $normalized = $this->normalize($identifier);
         if (!$this->validateIdentifier($normalized)) {
-            throw new InvalidArgumentException('Identifier must be a valid email or phone value.');
+            throw new InvalidArgumentException('Identifier must be a valid phone number.');
         }
 
-        // Use HMAC-SHA256 for fingerprint generation as required
+        // Use HMAC-SHA256 for fingerprint generation
         return hash_hmac('sha256', $normalized, $pepper);
     }
 }

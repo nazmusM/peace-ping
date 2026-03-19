@@ -39,32 +39,52 @@ class UserService
             throw new InvalidArgumentException('Invalid phone number format. Please use international format: +[country][number] or local format: [number]');
         }
 
-        // Check if phone already registered
+        // Check if phone already registered and verified
         $existingUser = $this->getUserByContactHash(
             $this->fingerprint->fingerprint($normalizedPhone, $this->pepper)
         );
-        if ($existingUser !== null) {
-            throw new InvalidArgumentException('This phone number is already registered. Please try logging in.');
+        if ($existingUser !== null && $existingUser['is_verified']) {
+            throw new InvalidArgumentException('This phone number is already registered and verified. Please try logging in.');
         }
 
         // Generate verification code
         $verificationCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $verificationExpiresAt = date('Y-m-d H:i:s', time() + 600); // 10 minutes
 
-        // Store in temporary registration table (or session)
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+        // Encrypt contact info
+        $encryptedContact = $this->encryption->encrypt($normalizedPhone);
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+
+        if ($existingUser !== null) {
+            // Update existing unverified user
+            $update = $this->db->prepare("
+                UPDATE users 
+                SET name = ?, contact_encrypted = ?, is_verified = FALSE, verification_code = ?, verification_expires_at = ?
+                WHERE id = ?
+            ");
+            $update->bind_param('ssssi', $name, $encryptedContact, $verificationCode, $verificationExpiresAt, $existingUser['id']);
+            $update->execute();
+            $update->close();
+
+            $userId = $existingUser['id'];
+        } else {
+            // Insert new user with verification info
+            $insert = $this->db->prepare("
+                INSERT INTO users (name, contact_encrypted, contact_hash, is_verified, verification_code, verification_expires_at)
+                VALUES (?, ?, ?, FALSE, ?, ?)
+            ");
+            $insert->bind_param('sssss', $name, $encryptedContact, $contactHash, $verificationCode, $verificationExpiresAt);
+            $insert->execute();
+
+            $userId = $insert->insert_id;
+            $insert->close();
         }
-        $_SESSION['pending_registration'] = [
-            'name' => $name,
-            'phone' => $normalizedPhone,
-            'verification_code' => $verificationCode,
-            'created_at' => time()
-        ];
 
         // Send SMS with verification code
         $this->notificationService->sendVerificationCode($normalizedPhone, $verificationCode);
 
         return [
+            'user_id' => $userId,
             'verification_code' => $verificationCode,
             'message' => 'Verification code sent to your mobile number.'
         ];
@@ -72,61 +92,56 @@ class UserService
 
     public function verifyAndCreate(string $code): array
     {
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+        // Find user with matching verification code
+        $query = $this->db->prepare("
+            SELECT id, name, contact_encrypted, verification_expires_at 
+            FROM users 
+            WHERE verification_code = ? AND is_verified = FALSE
+        ");
+        $query->bind_param('s', $code);
+        $query->execute();
+        $result = $query->get_result();
+
+        if ($result->num_rows === 0) {
+            throw new InvalidArgumentException('Invalid or expired verification code.');
         }
 
-        if (!isset($_SESSION['pending_registration'])) {
-            throw new InvalidArgumentException('No pending registration found.');
-        }
+        $user = $result->fetch_assoc();
+        $query->close();
 
-        $pending = $_SESSION['pending_registration'];
+        // Check if code is expired
+        if (strtotime($user['verification_expires_at']) < time()) {
+            // Clear expired verification code
+            $update = $this->db->prepare("UPDATE users SET verification_code = NULL, verification_expires_at = NULL WHERE id = ?");
+            $update->bind_param('i', $user['id']);
+            $update->execute();
+            $update->close();
 
-        // Check if code is expired (10 minutes)
-        if (time() - $pending['created_at'] > 600) {
-            unset($_SESSION['pending_registration']);
             throw new InvalidArgumentException('Verification code expired. Please register again.');
         }
 
-        if ($pending['verification_code'] !== $code) {
-            throw new InvalidArgumentException('Invalid verification code.');
+        // Mark user as verified and clear verification fields
+        $update = $this->db->prepare("
+            UPDATE users 
+            SET is_verified = TRUE, verification_code = NULL, verification_expires_at = NULL 
+            WHERE id = ?
+        ");
+        $update->bind_param('i', $user['id']);
+        $update->execute();
+        $update->close();
+
+        // Start session and log user in
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
         }
-
-        // Check if user already exists
-        $fingerprint = $this->fingerprint->fingerprint($pending['phone'], $this->pepper);
-        $existingUser = $this->getUserByContactHash($fingerprint);
-
-        if ($existingUser !== null) {
-            // User exists, just log them in
-            $_SESSION['user_id'] = $existingUser['id'];
-            $_SESSION['user_name'] = $existingUser['name'] ?? $pending['name'];
-            unset($_SESSION['pending_registration']);
-
-            return [
-                'user_id' => $existingUser['id'],
-                'message' => 'Login successful.'
-            ];
-        }
-
-        // Create new user
-        $encryptedPhone = $this->encryption->encrypt($pending['phone']);
-        $insert = $this->db->prepare(
-            'INSERT INTO users (name, contact_encrypted, contact_hash, created_at) VALUES (?, ?, ?, NOW())'
-        );
-        $insert->bind_param('sss', $pending['name'], $encryptedPhone, $fingerprint);
-        $insert->execute();
-        $insert->close();
-
-        $userId = $this->db->insert_id;
-
-        // Log user in
-        $_SESSION['user_id'] = $userId;
-        $_SESSION['user_name'] = $pending['name'];
-        unset($_SESSION['pending_registration']);
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['user_name'] = $user['name'];
 
         return [
-            'user_id' => $userId,
-            'message' => 'Registration successful.'
+            'success' => true,
+            'user_id' => $user['id'],
+            'name' => $user['name'],
+            'message' => 'Account verified successfully! You are now logged in.'
         ];
     }
 

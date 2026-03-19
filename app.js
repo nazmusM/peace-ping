@@ -109,18 +109,13 @@ pingForm.addEventListener("submit", async (event) => {
         }
 
         if (response.body.matched) {
-            // Show match found with flow-chart info
+            // Show match found with success message
             matchInfo.hidden = false;
-            matchMessage.textContent = "✨ Peace Ping Matched! Both of you will receive SMS messages with questions to help reconnect comfortably.";
+            matchMessage.textContent = "🎉 Match found! Check the SMS Inbox for your private preference link.";
 
-            showResult(resultEl, "🎉 Match found! Check your SMS and <a href='/matches' style='color: var(--accent); text-decoration: underline;'>view your matches</a> for details.", "ok");
-
-            // Auto-redirect to matches page after 5 seconds
-            setTimeout(() => {
-                window.location.href = '/matches';
-            }, 5000);
+            showResult(resultEl, "🎉 Match found! Check your SMS for the private link.", "ok");
         } else {
-            showResult(resultEl, "Peace Ping sent! If they also send you one, you'll both receive SMS questions to help reconnect.", "ok");
+            showResult(resultEl, "Peace Ping sent! If they also send you one, you'll both receive SMS messages with secure links to share your reconnection preferences.", "ok");
         }
     } catch (error) {
         showResult(resultEl, "Error checking login status.", "warn");

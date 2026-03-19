@@ -138,18 +138,17 @@ class PingService
             throw new InvalidArgumentException('Self and target identifiers must be different.');
         }
 
+        // Insert the ping
         $insert = $this->db->prepare(
-            'INSERT INTO pings (user_id, self_name, fingerprint_self, fingerprint_target, created_at)
-             VALUES (?, ?, ?, ?, NOW())
-             ON DUPLICATE KEY UPDATE self_name = VALUES(self_name), created_at = NOW()'
+            'INSERT INTO pings (user_id, fingerprint_self, fingerprint_target, created_at)
+             VALUES (?, ?, ?, NOW())'
         );
-        $nullUserId = null;
-        $insert->bind_param('isss', $nullUserId, $normalizedName, $fingerprintSelf, $fingerprintTarget);
+        $insert->bind_param('iss', $userId, $fingerprintSelf, $fingerprintTarget);
         $insert->execute();
         $insert->close();
 
         $reverse = $this->db->prepare(
-            'SELECT id, self_name FROM pings WHERE fingerprint_self = ? AND fingerprint_target = ? LIMIT 1'
+            'SELECT id FROM pings WHERE fingerprint_self = ? AND fingerprint_target = ? LIMIT 1'
         );
         $reverse->bind_param('ss', $fingerprintTarget, $fingerprintSelf);
         $reverse->execute();

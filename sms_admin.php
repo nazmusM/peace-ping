@@ -4,27 +4,30 @@ require_once __DIR__ . '/src/bootstrap.php';
 
 use App\Services\SmsService;
 
-$smsService = new SmsService($config);
+header('Content-Type: application/json; charset=utf-8');
 
+$smsService = new SmsService($config);
 $action = $_GET['action'] ?? 'status';
 
 switch ($action) {
     case 'status':
-        $status = $smsService->getQueueStatus();
-        echo json_encode($status, JSON_PRETTY_PRINT);
+        echo json_encode($smsService->getQueueStatus(), JSON_PRETTY_PRINT);
         break;
-        
+
     case 'process':
-        $result = $smsService->processQueue();
-        echo json_encode($result, JSON_PRETTY_PRINT);
+        echo json_encode($smsService->processQueue(), JSON_PRETTY_PRINT);
         break;
-        
+
     case 'logs':
-        $logs = $smsService->getSmsLogs(20);
-        echo json_encode($logs, JSON_PRETTY_PRINT);
+        echo json_encode([
+            'logs' => $smsService->getSmsLogs(20),
+            'mode' => 'inbox_only',
+            'message' => 'File-based SMS logs are disabled. Review messages in the SMS inbox instead.'
+        ], JSON_PRETTY_PRINT);
         break;
-        
+
     default:
-        echo json_encode(['error' => 'Invalid action'], 400);
+        http_response_code(400);
+        echo json_encode(['error' => 'Invalid action'], JSON_PRETTY_PRINT);
 }
 ?>

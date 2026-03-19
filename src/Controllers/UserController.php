@@ -3,13 +3,17 @@
 namespace App\Controllers;
 
 use App\Services\UserService;
+use App\Services\InboxService;
 use App\Utils\Response;
 use InvalidArgumentException;
 use Exception;
 
 class UserController
 {
-    public function __construct(private readonly UserService $userService) {}
+    public function __construct(
+        private readonly UserService $userService,
+        private readonly InboxService $inboxService
+    ) {}
 
     /**
      * Handle user registration request
@@ -63,6 +67,12 @@ class UserController
         }
 
         $result = $this->userService->register($name, $phone);
+
+        // Log verification code for testing (use actual user_id)
+        if (isset($result['user_id']) && isset($result['verification_code'])) {
+            $this->inboxService->logVerificationCode($result['user_id'], $phone, $result['verification_code']);
+        }
+
         Response::json($result);
     }
 

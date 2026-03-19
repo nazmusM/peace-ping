@@ -13,6 +13,7 @@ use App\Services\NotificationService;
 use App\Services\UserService;
 use App\Services\PingService;
 use App\Services\PeacePingService;
+use App\Services\InboxService;
 use App\Controllers\UserController;
 use App\Controllers\PingController;
 
@@ -32,11 +33,13 @@ $pingService = new PingService(
     $notificationService,
     $config['security']['pepper']
 );
+$inboxService = new InboxService($db);
 $peacePingService = new PeacePingService(
     $db,
     $fingerprint,
     $userService,
     $notificationService,
+    $inboxService,
     $config['security']['pepper']
 );
 $rateLimiter = new RateLimiter(
@@ -86,7 +89,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
         'how-it-works' => 'How It Works',
         'register' => 'Register & Verify',
         'ping' => 'Send Ping',
-        'matches' => 'My Matches',
+        'inbox' => 'SMS Inbox',
         'contact' => 'Contact'
     ];
 
@@ -117,7 +120,9 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                 <ul class="nav-links">
                     <?php foreach ($activeNav as $route => $label): ?>
                         <li>
-                            <a href="/<?php echo $route; ?>" <?php echo $route === $page ? 'class="active"' : ''; ?>>
+                            <a href="/<?php echo $route; ?>"
+                                <?php echo $route === $page ? 'class="active"' : ''; ?>
+                                <?php echo $route === 'inbox' ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>>
                                 <?php echo htmlspecialchars($label); ?>
                             </a>
                         </li>
@@ -141,8 +146,26 @@ function renderPage(string $title, string $content, string $page = 'home'): void
 <?php
 }
 
+function renderSmsMessage(string $message): string
+{
+    $escaped = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
+    $linked = preg_replace_callback(
+        '~(https?://[^\s<]+|/preferences\?token=[A-Za-z0-9]+)~',
+        static function (array $matches): string {
+            $url = $matches[1];
+            return '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener noreferrer">Visit preference page</a>';
+        },
+        $escaped
+    );
+
+    return nl2br($linked ?? $escaped);
+}
+
 // API Routes
 if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
+    // Debug: Log API request
+    error_log("DEBUG: API request - Method: " . ($_SERVER['REQUEST_METHOD'] ?? 'NULL') . ", URI: " . ($_SERVER['REQUEST_URI'] ?? 'NULL'));
+
     $method = $_SERVER['REQUEST_METHOD'];
     $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '/';
 
@@ -150,17 +173,35 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
         Response::json(['error' => 'Not found.'], 404);
         exit;
     }
+
 
-    // API Routes
     if ($path === '/api/register') {
-        $userController = new UserController($userService, $notificationService);
+        error_log("DEBUG: Handling register request");
+        $userController = new UserController($userService, $inboxService);
         $userController->handle();
         exit;
     }
 
     if ($path === '/api/ping') {
-        $pingController = new PingController($pingService, $rateLimiter);
-        $pingController->handle($_SERVER['REMOTE_ADDR']);
+        error_log("DEBUG: Handling ping request");
+
+        // Debug: Check if services are initialized
+        error_log("DEBUG: peacePingService exists: " . (isset($peacePingService) ? 'YES' : 'NO'));
+        error_log("DEBUG: rateLimiter exists: " . (isset($rateLimiter) ? 'YES' : 'NO'));
+
+        try {
+            $pingController = new PingController($peacePingService, $rateLimiter);
+            error_log("DEBUG: PingController created successfully");
+
+            $pingController->handle($_SERVER['REMOTE_ADDR']);
+            error_log("DEBUG: PingController handle completed");
+        } catch (Exception $e) {
+            error_log("DEBUG: Exception in ping controller: " . $e->getMessage());
+            Response::json(['error' => 'Internal server error: ' . $e->getMessage()], 500);
+        } catch (Error $e) {
+            error_log("DEBUG: Error in ping controller: " . $e->getMessage());
+            Response::json(['error' => 'Internal server error: ' . $e->getMessage()], 500);
+        }
         exit;
     }
 
@@ -171,12 +212,12 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
 // Page Routes
 $method = $_SERVER['REQUEST_METHOD'];
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '/';
+$isPreferencesRoute = $path === '/preferences' || strpos($path, '/preferences/') === 0;
 
-if ($method !== 'GET') {
+if ($method !== 'GET' && !($isPreferencesRoute && $method === 'POST')) {
     Response::json(['error' => 'Not found.'], 404);
     exit;
 }
-
 // Homepage
 if ($path === '/' || $path === '/home') {
     ob_start();
@@ -312,7 +353,7 @@ if ($path === '/register') {
                         <label for="verify-code">Verification Code</label>
                         <input id="verify-code" name="code" type="text" required placeholder="123456" maxlength="6">
                     </div>
-                    <button type="submit">Verify & Create Account</button>
+                    <button type="submit" class="btn">Verify & Create Account</button>
                 </form>
                 <p id="verify-result" class="result" aria-live="polite"></p>
             </article>
@@ -517,162 +558,116 @@ if ($path === '/ping') {
     exit;
 }
 
-// Matches page
-if ($path === '/matches') {
-    // Check if user is logged in
+// SMS Inbox page - PUBLIC for testing
+if ($path === '/inbox') {
+    // No login required - completely public for testing
     session_start();
-    if (!isset($_SESSION['user_id'])) {
-        header('Location: /register');
-        exit;
+    $userId = $_SESSION['user_id'] ?? null;
+    $user = null;
+
+    // Get messages - always show all messages for testing
+    $messages = [];
+    try {
+        if ($userId) {
+            // If logged in, get user's messages first, then add recent ones
+            $userMessages = $inboxService->getUserMessages($userId, 100);
+            $allMessages = $inboxService->getAllMessages(50);
+            $user = $userService->getUserById($userId);
+
+            // Combine and deduplicate
+            $messages = $allMessages;
+        } else {
+            // Always show all messages for testing
+            $messages = $inboxService->getAllMessages(50);
+        }
+    } catch (Exception $e) {
+        // Debug: show error info
+        $messages = [[
+            'phone_number' => 'DEBUG',
+            'message' => 'Error: ' . $e->getMessage(),
+            'direction' => 'outbound',
+            'status' => 'error',
+            'created_at' => date('Y-m-d H:i:s')
+        ]];
     }
-
-    $userId = $_SESSION['user_id'];
-    $user = $userService->getUserById($userId);
-
-    // Get user's matches
-    $matches = [];
-    $matchQuery = $db->prepare("
-        SELECT m.*, 
-               u1.name as user_a_name,
-               u2.name as user_b_name,
-               m.created_at as match_date,
-               CASE 
-                   WHEN m.user_a_id = ? THEN 'You initiated'
-                   WHEN m.user_b_id = ? THEN 'They initiated'
-                   ELSE 'Unknown'
-               END as initiator
-        FROM matches m
-        LEFT JOIN users u1 ON m.user_a_id = u1.id
-        LEFT JOIN users u2 ON m.user_b_id = u2.id
-        WHERE m.user_a_id = ? OR m.user_b_id = ?
-        ORDER BY m.created_at DESC
-    ");
-    $matchQuery->bind_param('iiii', $userId, $userId, $userId, $userId);
-    $matchQuery->execute();
-    $result = $matchQuery->get_result();
-
-    while ($row = $result->fetch_assoc()) {
-        $matches[] = $row;
-    }
-    $matchQuery->close();
-
-    // Get user's recent pings
-    $recentPings = [];
-    $pingQuery = $db->prepare("
-        SELECT p.*, 
-               CASE 
-                   WHEN EXISTS (
-                       SELECT 1 FROM matches m 
-                       WHERE (m.user_a_id = p.user_id OR m.user_b_id = p.user_id)
-                       AND m.fingerprint_a = p.fingerprint_target
-                   ) THEN 1
-                   ELSE 0
-               END as has_match
-        FROM pings p
-        WHERE p.user_id = ?
-        ORDER BY p.created_at DESC
-        LIMIT 10
-    ");
-    $pingQuery->bind_param('i', $userId);
-    $pingQuery->execute();
-    $pingResult = $pingQuery->get_result();
-
-    while ($row = $pingResult->fetch_assoc()) {
-        $recentPings[] = $row;
-    }
-    $pingQuery->close();
 
     ob_start();
 ?>
-    <div class="matches-page">
+    <div class="inbox-page">
         <div class="page-header">
-            <h1>My Matches</h1>
-            <p>See who you've connected with through Peace Ping</p>
-        </div>
-
-        <!-- Statistics -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-number"><?php echo count($matches); ?></div>
-                <div class="stat-label">Total Matches</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number"><?php echo count(array_filter($recentPings, fn($p) => $p['has_match'])); ?></div>
-                <div class="stat-label">Matched Pings</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number"><?php echo count(array_filter($recentPings, fn($p) => !$p['has_match'])); ?></div>
-                <div class="stat-label">Pending Pings</div>
-            </div>
-        </div>
-
-        <!-- Matches Section -->
-        <section>
-            <h2>🎉 Your Matches</h2>
-            <?php if (empty($matches)): ?>
-                <div class="empty-state card">
-                    <div class="empty-state-icon">💭</div>
-                    <h3>No matches yet</h3>
-                    <p>Keep sending Peace Pings! When someone you ping also pings you, you'll see your matches here.</p>
-                    <a href="/ping" class="btn">Send a Peace Ping</a>
-                </div>
+            <h1>📱 SMS Inbox</h1>
+            <p>View all SMS messages including verification codes and match notifications</p>
+            <?php if ($user): ?>
+                <p class="user-info">Logged in as: <strong><?php echo htmlspecialchars($user['name']); ?></strong></p>
             <?php else: ?>
-                <?php foreach ($matches as $match): ?>
-                    <div class="match-card">
-                        <div class="match-status">MATCH FOUND</div>
-                        <div class="match-date">Matched on <?php echo date('F j, Y \a\t g:i A', strtotime($match['match_date'])); ?></div>
-                        <h3>🎊 You have a mutual connection!</h3>
-                        <p><strong>Status:</strong> <?php echo htmlspecialchars($match['initiator']); ?></p>
-                        <p><strong>Next Steps:</strong> Both you and your match have received SMS messages with questions to help you reconnect comfortably.</p>
-                        <div style="margin-top: var(--space-md);">
-                            <small style="color: var(--muted);">
-                                💡 Check your mobile phone for SMS questions. This is your opportunity to reconnect thoughtfully.
-                            </small>
+                <p class="testing-mode">🧪 <strong>Testing Mode:</strong> Showing all messages for verification testing</p>
+            <?php endif; ?>
+        </div>
+
+        <?php if (empty($messages)): ?>
+            <div class="empty-state card">
+                <div class="empty-state-icon">📭</div>
+                <h3>No messages yet</h3>
+                <p>Register and send Peace Pings to see verification codes and match notifications here.</p>
+                <?php if (!$user): ?>
+                    <a href="/register" class="btn">Register Now</a>
+                <?php else: ?>
+                    <a href="/ping" class="btn">Send a Peace Ping</a>
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+            <div class="messages-list">
+                <?php foreach ($messages as $msg): ?>
+                    <div class="message-card <?php echo $msg['direction']; ?>">
+                        <div class="message-header">
+                            <div class="message-info">
+                                <span class="phone-number"><?php echo htmlspecialchars($msg['phone_number']); ?></span>
+                                <span class="message-time"><?php echo date('M j, Y \a\t g:i A', strtotime($msg['created_at'])); ?></span>
+                            </div>
+                            <div class="message-direction">
+                                <?php if ($msg['direction'] === 'inbound'): ?>
+                                    <span class="direction-badge inbound">📥 Inbound</span>
+                                <?php else: ?>
+                                    <span class="direction-badge outbound">📤 Outbound</span>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <div class="message-content">
+                            <?php echo renderSmsMessage($msg['message']); ?>
+                        </div>
+                        <div class="message-footer">
+                            <span class="status-badge status-<?php echo $msg['status']; ?>">
+                                <?php echo ucfirst($msg['status']); ?>
+                            </span>
+                            <?php if (isset($msg['user_id']) && $msg['user_id']): ?>
+                                <span class="user-badge">User ID: <?php echo $msg['user_id']; ?></span>
+                            <?php else: ?>
+                                <span class="user-badge pending">Pending Registration</span>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>
-            <?php endif; ?>
-        </section>
+            </div>
+        <?php endif; ?>
 
-        <!-- Recent Pings Section -->
-        <section style="margin-top: var(--space-2xl);">
-            <h2>📤 Recent Peace Pings</h2>
-            <?php if (empty($recentPings)): ?>
-                <div class="empty-state card">
-                    <div class="empty-state-icon">📭</div>
-                    <h3>No pings sent yet</h3>
-                    <p>Start by sending your first Peace Ping to reconnect with someone.</p>
-                    <a href="/ping" class="btn">Send a Peace Ping</a>
-                </div>
-            <?php else: ?>
-                <?php foreach ($recentPings as $ping): ?>
-                    <div class="ping-card">
-                        <div>
-                            <strong>Ping sent to:</strong>
-                            <span style="color: var(--muted);">
-                                <?php
-                                $target = substr($ping['fingerprint_target'], 0, 8) . '...';
-                                echo htmlspecialchars($target);
-                                ?>
-                            </span>
-                            <br>
-                            <small style="color: var(--muted);">
-                                <?php echo date('M j, Y \a\t g:i A', strtotime($ping['created_at'])); ?>
-                            </small>
-                        </div>
-                        <div>
-                            <span class="ping-status <?php echo $ping['has_match'] ? 'matched' : 'pending'; ?>">
-                                <?php echo $ping['has_match'] ? '✅ Matched' : '⏳ Pending'; ?>
-                            </span>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
+        <div class="inbox-info card" style="margin-top: var(--space-2xl);">
+            <h3>🔍 About This Inbox</h3>
+            <p>This is a <strong>public testing inbox</strong> that shows all SMS messages sent by the Peace Ping system:</p>
+            <ul>
+                <li><strong>Verification Codes:</strong> When users register, their verification codes appear here</li>
+                <li><strong>Match Notifications:</strong> When Peace Pings match, both users receive match notifications</li>
+                <li><strong>Test Messages:</strong> All messages are logged here for easy testing and debugging</li>
+            </ul>
+            <?php if (!$user): ?>
+                <p style="margin-top: var(--space-lg);">
+                    <strong>For full testing:</strong> <a href="/register">Register an account</a> to see how verification codes work.
+                </p>
             <?php endif; ?>
-        </section>
+        </div>
     </div>
 <?php
     $content = ob_get_clean();
-    renderPage('My Matches', $content, 'matches');
+    renderPage('SMS Inbox', $content, 'inbox');
     exit;
 }
 
@@ -735,13 +730,27 @@ if ($path === '/contact') {
 }
 
 // Preferences page
-if (strpos($path, '/preferences/') === 0) {
-    // Get token from URL
+if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
     $token = $_GET['token'] ?? '';
+    if ($token === '' && strpos($path, '/preferences/') === 0) {
+        $token = basename($path);
+    }
+
     $error = '';
     $success = '';
+    $context = $token !== '' ? $peacePingService->getPreferenceContext($token) : null;
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if ($token === '') {
+        $error = 'Missing preference token.';
+    } elseif ($context === null) {
+        $error = 'Invalid or expired link.';
+    } elseif ($context['is_used']) {
+        $error = 'This preference link has already been used.';
+    } elseif ($context['is_expired']) {
+        $error = 'This preference link has expired.';
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         $preference = $_POST['preference'] ?? '';
 
         try {
@@ -752,133 +761,114 @@ if (strpos($path, '/preferences/') === 0) {
         }
     }
 
+    $matchedName = $context['other_name'] ?? 'the other person';
+
     ob_start();
 ?>
     <div class="preferences-page">
         <div class="page-header">
-            <h1>🕊️ Peace Ping Match!</h1>
-            <p>Someone you're thinking about is also thinking about you. Please share your preferences for reconnecting.</p>
+            <h1>Private Coordination Preferences</h1>
+            <p>You and <?php echo htmlspecialchars($matchedName); ?> have both indicated openness to reconnecting.</p>
+            <p>How would you like this to proceed?</p>
         </div>
 
         <?php if ($success): ?>
             <div class="success-message card">
-                <h3>✅ Thank You!</h3>
+                <h3>Preference Recorded</h3>
                 <p><?php echo htmlspecialchars($success); ?></p>
             </div>
         <?php endif; ?>
 
         <?php if ($error): ?>
             <div class="error-message card">
-                <h3>❌ Error</h3>
+                <h3>Preference Unavailable</h3>
                 <p><?php echo htmlspecialchars($error); ?></p>
             </div>
         <?php endif; ?>
 
-        <?php if (!$success): ?>
+        <?php if (!$success && !$error): ?>
             <div class="form-container">
                 <form method="POST" id="preference-form">
-                    <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
-
                     <div class="preference-card" data-preference="comfortable">
-                        <span class="preference-icon">🤝</span>
+                        <span class="preference-icon">A</span>
                         <div class="preference-title">I'm comfortable reaching out</div>
                         <div class="preference-description">
-                            I'm happy to make the first move and reconnect directly. I feel confident about reaching out to reestablish our connection.
+                            Your selection stays private. It is used only to choose the system wording sent to both people.
                         </div>
                     </div>
 
                     <div class="preference-card" data-preference="prefer_other">
-                        <span class="preference-icon">🙏</span>
-                        <div class="preference-title">I prefer the other person to reach out</div>
+                        <span class="preference-icon">B</span>
+                        <div class="preference-title">I'd prefer the other person reach out</div>
                         <div class="preference-description">
-                            I'd be more comfortable if the other person initiates the reconnection. I'm open to reconnecting but prefer they take the lead.
+                            Your selection stays private. It is never shown to the other person and never used to assign responsibility.
                         </div>
                     </div>
 
                     <div class="preference-card" data-preference="either">
-                        <span class="preference-icon">🌟</span>
-                        <div class="preference-title">Either way is fine with me</div>
+                        <span class="preference-icon">C</span>
+                        <div class="preference-title">Either is fine</div>
                         <div class="preference-description">
-                            I'm comfortable either way - whether I reach out or they do. The important thing is that we reconnect, regardless of who initiates.
+                            Your selection stays private. The system uses it only to choose neutral wording for the final permission message.
                         </div>
                     </div>
 
                     <button type="submit" class="btn submit-btn" id="submit-btn" disabled>
-                        Please select your preference above
+                        Please select one option above
                     </button>
                 </form>
             </div>
         <?php endif; ?>
 
         <div class="card" style="margin-top: var(--space-2xl);">
-            <h3>🔒 Your Privacy Matters</h3>
-            <p>Your preference is completely confidential and will only be used to determine the most appropriate way to facilitate your reconnection. The other person will not see your specific choice - they will only receive a neutral message based on both of your preferences.</p>
-
-            <div style="margin-top: var(--space-lg);">
-                <h4>What happens next?</h4>
-                <ul style="color: var(--muted); line-height: 1.8;">
-                    <li>Both people share their preferences privately</li>
-                    <li>Our system determines the best approach based on both preferences</li>
-                    <li>You'll both receive a final message with guidance for reconnection</li>
-                    <li>The final message respects both people's comfort levels</li>
-                </ul>
-            </div>
+            <h3>Your Privacy</h3>
+            <p>These selections are never shown to the other person, never used to assign responsibility, and used only to choose the system wording.</p>
         </div>
     </div>
 
     <script>
-        // Preference selection handling
         const preferenceCards = document.querySelectorAll('.preference-card');
         const submitBtn = document.getElementById('submit-btn');
         const form = document.getElementById('preference-form');
         let selectedPreference = null;
 
-        preferenceCards.forEach(card => {
-            card.addEventListener('click', function() {
-                // Remove selected class from all cards
-                preferenceCards.forEach(c => c.classList.remove('selected'));
+        if (form && submitBtn) {
+            preferenceCards.forEach((card) => {
+                card.addEventListener('click', function () {
+                    preferenceCards.forEach((item) => item.classList.remove('selected'));
+                    this.classList.add('selected');
+                    selectedPreference = this.dataset.preference;
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit my private preference';
 
-                // Add selected class to clicked card
-                this.classList.add('selected');
-
-                // Store the preference
-                selectedPreference = this.dataset.preference;
-
-                // Update submit button
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Submit My Preference';
-
-                // Add hidden input for form submission
-                let hiddenInput = form.querySelector('input[name="preference"]');
-                if (!hiddenInput) {
-                    hiddenInput = document.createElement('input');
-                    hiddenInput.type = 'hidden';
-                    hiddenInput.name = 'preference';
-                    form.appendChild(hiddenInput);
-                }
-                hiddenInput.value = selectedPreference;
+                    let hiddenInput = form.querySelector('input[name="preference"]');
+                    if (!hiddenInput) {
+                        hiddenInput = document.createElement('input');
+                        hiddenInput.type = 'hidden';
+                        hiddenInput.name = 'preference';
+                        form.appendChild(hiddenInput);
+                    }
+                    hiddenInput.value = selectedPreference;
+                });
             });
-        });
 
-        // Form submission
-        form.addEventListener('submit', function(e) {
-            if (!selectedPreference) {
-                e.preventDefault();
-                alert('Please select your preference before submitting.');
-                return;
-            }
+            form.addEventListener('submit', function (event) {
+                if (!selectedPreference) {
+                    event.preventDefault();
+                    alert('Please select a preference before submitting.');
+                    return;
+                }
 
-            // Disable submit button to prevent double submission
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Submitting...';
-        });
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Submitting...';
+            });
+        }
     </script>
 <?php
     $content = ob_get_clean();
     renderPage('Preferences', $content, 'preferences');
     exit;
 }
-
 // 404 page
 Response::json(['error' => 'Page not found.'], 404);
 ?>

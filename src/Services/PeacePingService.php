@@ -3,19 +3,9 @@
 namespace App\Services;
 
 use App\Fingerprint;
-use App\Services\UserService;
-use App\Services\NotificationService;
 use InvalidArgumentException;
 use mysqli;
 
-/**
- * Multi-stage Peace Ping system
- * 
- * Stage 1: User submits ping (stored as fingerprint)
- * Stage 2: When match detected, send private links via SMS
- * Stage 3: Users submit preferences via private links
- * Stage 4: When both preferences submitted, send final messages
- */
 class PeacePingService
 {
     public function __construct(
@@ -23,63 +13,43 @@ class PeacePingService
         private readonly Fingerprint $fingerprint,
         private readonly UserService $userService,
         private readonly NotificationService $notificationService,
+        private readonly InboxService $inboxService,
         private readonly string $pepper
-    ) {}
+    ) {
+        error_log('DEBUG: PeacePingService constructor called');
+    }
 
-    /**
-     * Stage 1: Submit initial ping
-     */
     public function submitPing(int $userId, string $targetIdentifier): array
     {
-        // Get user contact
+        error_log("DEBUG: submitPing called - userId: $userId, target: $targetIdentifier");
+
         $userContact = $this->userService->getUserContact($userId);
         if ($userContact === null) {
             throw new InvalidArgumentException('User contact not found.');
         }
 
         $userFingerprint = $this->fingerprint->fingerprint($userContact, $this->pepper);
-
-        // Validate target identifier
         $normalizedTarget = $this->fingerprint->normalize($targetIdentifier);
         if (!$this->fingerprint->validateIdentifier($normalizedTarget)) {
             throw new InvalidArgumentException('Invalid phone number format. Please use international format: +[country][number] or local format: [number]');
         }
 
         $fingerprintTarget = $this->fingerprint->fingerprint($normalizedTarget, $this->pepper);
-
-        // PREVENT SELF-PINGING: Check if user is trying to ping themselves
         if ($userFingerprint === $fingerprintTarget) {
             throw new InvalidArgumentException('You cannot ping yourself. Please enter a different phone number.');
         }
 
-        // PREVENT DUPLICATE PINGS: Check if user already pinged this target recently
-        $recentPing = $this->db->prepare(
-            'SELECT COUNT(*) as count FROM pings 
-             WHERE user_id = ? AND fingerprint_target = ? 
-             AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)'
-        );
-        $recentPing->bind_param('is', $userId, $fingerprintTarget);
-        $recentPing->execute();
-        $pingCount = $recentPing->get_result()->fetch_assoc()['count'];
-        $recentPing->close();
-
-        if ($pingCount > 0) {
-            throw new InvalidArgumentException('You have already sent a Peace Ping to this number in the last hour. Please wait before trying again.');
-        }
-
-        // Insert the ping
         $insert = $this->db->prepare(
-            'INSERT INTO pings (user_id, fingerprint_target, created_at)
-             VALUES (?, ?, NOW())
+            'INSERT INTO pings (user_id, fingerprint_self, fingerprint_target, created_at)
+             VALUES (?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE created_at = NOW()'
         );
-        $insert->bind_param('is', $userId, $fingerprintTarget);
+        $insert->bind_param('iss', $userId, $userFingerprint, $fingerprintTarget);
         $insert->execute();
         $insert->close();
 
-        // Check for reverse ping (match detection)
         $reversePing = $this->db->prepare(
-            'SELECT user_id, created_at FROM pings 
+            'SELECT user_id FROM pings
              WHERE fingerprint_target = ? AND user_id != ?
              ORDER BY created_at DESC LIMIT 1'
         );
@@ -91,11 +61,9 @@ class PeacePingService
             $reverseData = $reverseResult->fetch_assoc();
             $reversePing->close();
 
-            // We have a match! Create match record and send Stage 2 notifications
-            $matchId = $this->createMatch($userId, $reverseData['user_id'], $userFingerprint, $fingerprintTarget);
-
+            $matchId = $this->createMatch($userId, (int) $reverseData['user_id'], $userFingerprint, $fingerprintTarget);
             if ($matchId) {
-                $this->sendStage2Notifications($matchId, $userId, $reverseData['user_id']);
+                $this->sendStage2Notifications($matchId, $userId, (int) $reverseData['user_id']);
 
                 return [
                     'matched' => true,
@@ -108,18 +76,45 @@ class PeacePingService
 
         return [
             'matched' => false,
-            'message' => 'Peace Ping sent! If they also send you one, you\'ll both receive SMS messages with questions to help reconnect.'
+            'message' => 'Peace Ping sent! If they also send you one, you\'ll both receive SMS messages with secure links to share your reconnection preferences.'
         ];
     }
 
-    /**
-     * Create match record
-     */
+    public function getPreferenceContext(string $token): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT mt.user_id, mt.match_id, mt.is_used, mt.expires_at, m.user_a_id, m.user_b_id
+             FROM match_tokens mt
+             JOIN matches m ON mt.match_id = m.id
+             WHERE mt.token = ?
+             LIMIT 1'
+        );
+        $stmt->bind_param('s', $token);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$row) {
+            return null;
+        }
+
+        $isExpired = strtotime((string) $row['expires_at']) <= time();
+        $otherUserId = ((int) $row['user_a_id'] === (int) $row['user_id']) ? (int) $row['user_b_id'] : (int) $row['user_a_id'];
+        $otherUser = $otherUserId > 0 ? $this->userService->getUserById($otherUserId) : null;
+
+        return [
+            'user_id' => (int) $row['user_id'],
+            'match_id' => (int) $row['match_id'],
+            'is_used' => (bool) $row['is_used'],
+            'is_expired' => $isExpired,
+            'other_name' => $this->displayName($otherUser['name'] ?? null),
+        ];
+    }
+
     private function createMatch(int $userAId, int $userBId, string $fingerprintA, string $fingerprintB): ?int
     {
-        // Check if match already exists
         $existingMatch = $this->db->prepare(
-            'SELECT id FROM matches 
+            'SELECT id FROM matches
              WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)'
         );
         $existingMatch->bind_param('iiii', $userAId, $userBId, $userBId, $userAId);
@@ -127,18 +122,17 @@ class PeacePingService
         $result = $existingMatch->get_result();
 
         if ($result->num_rows > 0) {
-            $matchId = $result->fetch_assoc()['id'];
+            $matchId = (int) $result->fetch_assoc()['id'];
             $existingMatch->close();
             return $matchId;
         }
         $existingMatch->close();
 
-        // Create new match
         $insert = $this->db->prepare(
             'INSERT INTO matches (user_a_id, user_b_id, fingerprint_a, fingerprint_b, stage, created_at)
              VALUES (?, ?, ?, ?, 2, NOW())'
         );
-        $insert->bind_param('iisss', $userAId, $userBId, $fingerprintA, $fingerprintB);
+        $insert->bind_param('iiss', $userAId, $userBId, $fingerprintA, $fingerprintB);
 
         if ($insert->execute()) {
             $matchId = $insert->insert_id;
@@ -150,55 +144,44 @@ class PeacePingService
         return null;
     }
 
-    /**
-     * Send Stage 2 notifications (private links)
-     */
     private function sendStage2Notifications(int $matchId, int $userAId, int $userBId): void
     {
-        // Generate unique tokens for each user
-        $tokenA = $this->generateSecureToken();
-        $tokenB = $this->generateSecureToken();
+        $tokenA = bin2hex(random_bytes(32));
+        $tokenB = bin2hex(random_bytes(32));
+        $expiresAt = date('Y-m-d H:i:s', time() + 7 * 24 * 60 * 60);
 
-        // Store tokens
         $stmt = $this->db->prepare(
-            'INSERT INTO match_tokens (match_id, user_id, token, created_at) VALUES (?, ?, ?, NOW()), (?, ?, ?, NOW())'
+            'INSERT INTO match_tokens (match_id, user_id, token, created_at, expires_at)
+             VALUES (?, ?, ?, NOW(), ?), (?, ?, ?, NOW(), ?)'
         );
-        $stmt->bind_param('iisis', $matchId, $userAId, $tokenA, $matchId, $userBId, $tokenB);
+        $stmt->bind_param('iissiiss', $matchId, $userAId, $tokenA, $expiresAt, $matchId, $userBId, $tokenB, $expiresAt);
         $stmt->execute();
         $stmt->close();
 
-        // Get user contacts
         $userA = $this->userService->getUserById($userAId);
         $userB = $this->userService->getUserById($userBId);
+        $contactA = $this->userService->getUserContact($userAId);
+        $contactB = $this->userService->getUserContact($userBId);
 
-        if ($userA && $userB) {
-            $contactA = $this->userService->getUserContact($userAId);
-            $contactB = $this->userService->getUserContact($userBId);
+        if ($contactA !== null) {
+            $messageA = $this->buildStage2Message($this->displayName($userB['name'] ?? null), $this->buildPreferenceUrl($tokenA));
+            $this->notificationService->sendSmsMessage($contactA, $messageA);
+            $this->inboxService->logMessage($userAId, $contactA, $messageA);
+        }
 
-            if ($contactA && $contactB) {
-                // Send SMS with private links
-                $linkA = "https://peaceping.com/preferences/$tokenA";
-                $linkB = "https://peaceping.com/preferences/$tokenB";
-
-                $messageA = "🕊️ Peace Ping Match! Someone you're thinking about is also thinking about you. Click here to share your preferences: $linkA";
-                $messageB = "🕊️ Peace Ping Match! Someone you're thinking about is also thinking about you. Click here to share your preferences: $linkB";
-
-                $this->notificationService->sendVerificationCode($contactA, $messageA);
-                $this->notificationService->sendVerificationCode($contactB, $messageB);
-            }
+        if ($contactB !== null) {
+            $messageB = $this->buildStage2Message($this->displayName($userA['name'] ?? null), $this->buildPreferenceUrl($tokenB));
+            $this->notificationService->sendSmsMessage($contactB, $messageB);
+            $this->inboxService->logMessage($userBId, $contactB, $messageB);
         }
     }
 
-    /**
-     * Handle Stage 3: Submit preference via private link
-     */
     public function submitPreference(string $token, string $preference): array
     {
-        // Validate token
         $tokenQuery = $this->db->prepare(
-            'SELECT mt.user_id, mt.match_id, m.stage FROM match_tokens mt 
-             JOIN matches m ON mt.match_id = m.id 
-             WHERE mt.token = ? AND mt.used = 0'
+            'SELECT mt.user_id, mt.match_id
+             FROM match_tokens mt
+             WHERE mt.token = ? AND mt.is_used = 0 AND mt.expires_at > NOW()'
         );
         $tokenQuery->bind_param('s', $token);
         $tokenQuery->execute();
@@ -211,42 +194,36 @@ class PeacePingService
         $tokenData = $tokenResult->fetch_assoc();
         $tokenQuery->close();
 
-        // Validate preference
         $validPreferences = ['comfortable', 'prefer_other', 'either'];
-        if (!in_array($preference, $validPreferences)) {
+        if (!in_array($preference, $validPreferences, true)) {
             throw new InvalidArgumentException('Invalid preference.');
         }
 
-        // Mark token as used
-        $stmt = $this->db->prepare('UPDATE match_tokens SET used = 1 WHERE token = ?');
+        $stmt = $this->db->prepare('UPDATE match_tokens SET is_used = 1 WHERE token = ?');
         $stmt->bind_param('s', $token);
         $stmt->execute();
         $stmt->close();
 
-        // Store preference
         $stmt = $this->db->prepare(
-            'INSERT INTO match_preferences (match_id, user_id, preference, created_at) 
-             VALUES (?, ?, ?, NOW()) 
-             ON DUPLICATE KEY UPDATE preference = ?, created_at = NOW()'
+            'INSERT INTO match_preferences (match_id, user_id, preference, submitted_at)
+             VALUES (?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE preference = VALUES(preference), submitted_at = NOW()'
         );
-        $stmt->bind_param('iiss', $tokenData['match_id'], $tokenData['user_id'], $preference, $preference);
+        $stmt->bind_param('iis', $tokenData['match_id'], $tokenData['user_id'], $preference);
         $stmt->execute();
         $stmt->close();
 
-        // Check if both users have submitted preferences
         $preferenceCheck = $this->db->prepare(
             'SELECT COUNT(*) as count FROM match_preferences WHERE match_id = ?'
         );
         $preferenceCheck->bind_param('i', $tokenData['match_id']);
         $preferenceCheck->execute();
-        $preferenceCount = $preferenceCheck->get_result()->fetch_assoc()['count'];
+        $preferenceCount = (int) $preferenceCheck->get_result()->fetch_assoc()['count'];
         $preferenceCheck->close();
 
         if ($preferenceCount === 2) {
-            // Both users have submitted preferences - send Stage 4 messages
-            $this->sendStage4Messages($tokenData['match_id']);
+            $this->sendStage3Messages((int) $tokenData['match_id']);
 
-            // Update match stage to completed
             $stmt = $this->db->prepare('UPDATE matches SET stage = 4, completed_at = NOW() WHERE id = ?');
             $stmt->bind_param('i', $tokenData['match_id']);
             $stmt->execute();
@@ -256,21 +233,18 @@ class PeacePingService
         return [
             'success' => true,
             'message' => $preferenceCount === 2
-                ? 'Thank you! Both preferences received. Check your SMS for the final message.'
-                : 'Thank you! We\'ll send the final message once both people have shared their preferences.'
+                ? 'Thank you. Both private preferences are in, and the final message has been sent.'
+                : 'Thank you. Your private preference has been recorded. We will send the final message once both people have responded.'
         ];
     }
 
-    /**
-     * Send Stage 4 messages (final messages based on preferences)
-     */
-    private function sendStage4Messages(int $matchId): void
+    private function sendStage3Messages(int $matchId): void
     {
-        // Get preferences
         $preferencesQuery = $this->db->prepare(
-            'SELECT mp.user_id, mp.preference, u.contact_encrypted FROM match_preferences mp 
-             JOIN users u ON mp.user_id = u.id 
-             WHERE mp.match_id = ?'
+            'SELECT mp.user_id, mp.preference
+             FROM match_preferences mp
+             WHERE mp.match_id = ?
+             ORDER BY mp.id ASC'
         );
         $preferencesQuery->bind_param('i', $matchId);
         $preferencesQuery->execute();
@@ -281,70 +255,63 @@ class PeacePingService
             return;
         }
 
-        // Determine message based on preferences
         $message = $this->determineFinalMessage($preferences[0]['preference'], $preferences[1]['preference']);
 
-        // Send final messages to both users
         foreach ($preferences as $pref) {
-            $contact = $this->userService->getUserContact($pref['user_id']);
-            if ($contact) {
-                $this->notificationService->sendVerificationCode($contact, $message);
+            $userId = (int) $pref['user_id'];
+            $contact = $this->userService->getUserContact($userId);
+            if ($contact !== null) {
+                $this->notificationService->sendSmsMessage($contact, $message);
+                $this->inboxService->logMessage($userId, $contact, $message);
             }
         }
     }
 
-    /**
-     * Determine final message based on both preferences
-     */
     private function determineFinalMessage(string $pref1, string $pref2): string
     {
-        // Both comfortable reaching out
-        if ($pref1 === 'comfortable' && $pref2 === 'comfortable') {
-            return "🎉 Peace Ping Complete! Both of you are comfortable reaching out. Feel free to reconnect when you're ready!";
+        if ($pref1 === 'comfortable' || $pref2 === 'comfortable') {
+            return "You're both open to reconnecting.\nEither of you may reach out in whatever way feels right.";
         }
 
-        // Both prefer the other to reach out
+        if ($pref1 === 'either' && $pref2 === 'either') {
+            return "There is mutual openness to reconnecting.\nIf contact happens, it can be assumed to be welcome.";
+        }
+
         if ($pref1 === 'prefer_other' && $pref2 === 'prefer_other') {
-            return "🕊️ Peace Ping Complete! Both of you prefer the other to reach out. Sometimes the best connections happen when the time is right.";
+            return "Mutual openness has been confirmed.\nNo one is expected to initiate. Contact may happen naturally, or not at all.";
         }
 
-        // Mixed preferences or either is fine
-        if (($pref1 === 'comfortable' && $pref2 === 'prefer_other') ||
-            ($pref1 === 'prefer_other' && $pref2 === 'comfortable') ||
-            ($pref1 === 'either' || $pref2 === 'either')
-        ) {
-            return "🌟 Peace Ping Complete! There's mutual interest in reconnecting. One of you is comfortable reaching out, so a beautiful reconnection may be just around the corner!";
-        }
-
-        return "💫 Peace Ping Complete! There's mutual interest in reconnecting. The universe has aligned - may your reconnection be peaceful and meaningful.";
+        return "There is mutual openness to reconnecting.\nIf contact happens, it can be assumed to be welcome.";
     }
 
-    /**
-     * Generate secure token for private links
-     */
-    private function generateSecureToken(): string
+    private function buildStage2Message(string $otherName, string $link): string
     {
-        return bin2hex(random_bytes(32));
+        return "You and {$otherName} have both indicated openness to reconnecting.\nHow would you like this to proceed?\n\nVisit preference page: {$link}";
     }
 
-    /**
-     * Get match status for user
-     */
+    private function buildPreferenceUrl(string $token): string
+    {
+        return rtrim($this->getBaseUrl(), '/') . '/preferences?token=' . $token;
+    }
+
+    private function getBaseUrl(): string
+    {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+
+        return $scheme . '://' . $host;
+    }
+
+    private function displayName(?string $name): string
+    {
+        $name = trim((string) $name);
+        return $name !== '' ? $name : 'the other person';
+    }
+
     public function getMatchStatus(int $userId): array
     {
         $matches = [];
-        $matchQuery = $this->db->prepare("
-            SELECT m.*, 
-                   CASE 
-                       WHEN m.user_a_id = ? THEN 'You initiated'
-                       WHEN m.user_b_id = ? THEN 'They initiated'
-                       ELSE 'Unknown'
-                   END as initiator,
-                   m.stage
-            FROM matches m
-            WHERE m.user_a_id = ? OR m.user_b_id = ?
-            ORDER BY m.created_at DESC
-        ");
+        $matchQuery = $this->db->prepare("\n            SELECT m.*,\n                   CASE\n                       WHEN m.user_a_id = ? THEN 'You initiated'\n                       WHEN m.user_b_id = ? THEN 'They initiated'\n                       ELSE 'Unknown'\n                   END as initiator,\n                   m.stage\n            FROM matches m\n            WHERE m.user_a_id = ? OR m.user_b_id = ?\n            ORDER BY m.created_at DESC\n        ");
         $matchQuery->bind_param('iiii', $userId, $userId, $userId, $userId);
         $matchQuery->execute();
         $result = $matchQuery->get_result();
