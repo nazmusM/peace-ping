@@ -20,6 +20,12 @@ return [
         'sms_webhook_url' => getenv('PEACEPING_SMS_WEBHOOK_URL') ?: '',
     ],
 
+    'twilio' => [
+        'account_sid' => getenv('TWILIO_ACCOUNT_SID') ?: '',
+        'auth_token' => getenv('TWILIO_AUTH_TOKEN') ?: '',
+        'phone_number' => getenv('TWILIO_PHONE_NUMBER') ?: '',
+    ],
+
     'rate_limit' => [
         'max_pings_per_hour' => 20, // Increased for testing
     ],
