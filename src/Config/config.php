@@ -18,12 +18,14 @@ return [
     'notifications' => [
         'email_from' => getenv('PEACEPING_EMAIL_FROM') ?: 'no-reply@peaceping.local',
         'sms_webhook_url' => getenv('PEACEPING_SMS_WEBHOOK_URL') ?: '',
+        'portal_url' => getenv('PEACEPING_PORTAL_URL') ?: '',
     ],
 
     'twilio' => [
         'account_sid' => getenv('TWILIO_ACCOUNT_SID') ?: '',
         'auth_token' => getenv('TWILIO_AUTH_TOKEN') ?: '',
         'phone_number' => getenv('TWILIO_PHONE_NUMBER') ?: '',
+        'messaging_service_sid' => getenv('TWILIO_MESSAGING_SERVICE_SID') ?: '',
     ],
 
     'rate_limit' => [

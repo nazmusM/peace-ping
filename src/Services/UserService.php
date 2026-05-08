@@ -22,15 +22,9 @@ class UserService
      */
     public function register(string $name, string $phone): array
     {
-        // Validate name
-        if (empty(trim($name))) {
-            throw new InvalidArgumentException('Name is required.');
-        }
+        $name = trim($name) !== '' ? trim($name) : 'Peace Ping User';
         if (strlen($name) > 120) {
             throw new InvalidArgumentException('Name must be less than 120 characters.');
-        }
-        if (!preg_match('/^[a-zA-Z\s\-\'\.]+$/', $name)) {
-            throw new InvalidArgumentException('Name can only contain letters, spaces, hyphens, apostrophes, and periods.');
         }
 
         // Validate phone
@@ -39,13 +33,9 @@ class UserService
             throw new InvalidArgumentException('Invalid phone number format. Please use international format: +[country][number] or local format: [number]');
         }
 
-        // Check if phone already registered and verified
         $existingUser = $this->getUserByContactHash(
             $this->fingerprint->fingerprint($normalizedPhone, $this->pepper)
         );
-        if ($existingUser !== null && $existingUser['is_verified']) {
-            throw new InvalidArgumentException('This phone number is already registered and verified. Please try logging in.');
-        }
 
         // Generate verification code
         $verificationCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
@@ -59,7 +49,7 @@ class UserService
             // Update existing unverified user
             $update = $this->db->prepare("
                 UPDATE users 
-                SET name = ?, contact_encrypted = ?, is_verified = FALSE, verification_code = ?, verification_expires_at = ?
+                SET name = ?, contact_encrypted = ?, verification_code = ?, verification_expires_at = ?
                 WHERE id = ?
             ");
             $update->bind_param('ssssi', $name, $encryptedContact, $verificationCode, $verificationExpiresAt, $existingUser['id']);
@@ -83,22 +73,36 @@ class UserService
         // Send SMS with verification code
         $this->notificationService->sendVerificationCode($normalizedPhone, $verificationCode);
 
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $_SESSION['pending_verification_user_id'] = (int) $userId;
+
         return [
             'user_id' => $userId,
-            'verification_code' => $verificationCode,
             'message' => 'Verification code sent to your mobile number.'
         ];
     }
 
-    public function verifyAndCreate(string $code): array
+    public function verifyAndCreate(string $code, ?int $pendingUserId = null): array
     {
-        // Find user with matching verification code
-        $query = $this->db->prepare("
-            SELECT id, name, contact_encrypted, verification_expires_at 
-            FROM users 
-            WHERE verification_code = ? AND is_verified = FALSE
-        ");
-        $query->bind_param('s', $code);
+        if ($pendingUserId !== null) {
+            $query = $this->db->prepare("
+                SELECT id, name, contact_encrypted, verification_expires_at
+                FROM users
+                WHERE id = ? AND verification_code = ?
+                LIMIT 1
+            ");
+            $query->bind_param('is', $pendingUserId, $code);
+        } else {
+            $query = $this->db->prepare("
+                SELECT id, name, contact_encrypted, verification_expires_at
+                FROM users
+                WHERE verification_code = ?
+                LIMIT 1
+            ");
+            $query->bind_param('s', $code);
+        }
         $query->execute();
         $result = $query->get_result();
 
@@ -136,6 +140,7 @@ class UserService
         }
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['user_name'] = $user['name'];
+        unset($_SESSION['pending_verification_user_id']);
 
         return [
             'success' => true,

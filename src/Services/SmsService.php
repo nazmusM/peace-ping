@@ -7,12 +7,14 @@ class SmsService
     private string $accountSid;
     private string $authToken;
     private string $fromNumber;
+    private string $messagingServiceSid;
 
     public function __construct(private readonly array $config)
     {
         $this->accountSid = $config['twilio']['account_sid'] ?? '';
         $this->authToken = $config['twilio']['auth_token'] ?? '';
-        $this->fromNumber = $config['twilio']['phone_number'] ?? 'PeacePing'; // Use a friendly name for the sender ID in staging
+        $this->fromNumber = $config['twilio']['phone_number'] ?? '';
+        $this->messagingServiceSid = $config['twilio']['messaging_service_sid'] ?? '';
     }
 
     /**
@@ -23,27 +25,38 @@ class SmsService
         error_log('SmsService::sendSms called with phone: ' . $phoneNumber);
         error_log('Twilio config - SID: ' . substr($this->accountSid, 0, 8) . '..., From: ' . $this->fromNumber);
 
-        // If Twilio credentials are not configured, fall back to simulation mode
-        if (empty($this->accountSid) || empty($this->authToken) || empty($this->fromNumber)) {
-            error_log('Twilio credentials not configured. SMS sending simulated.');
-            return true;
+        if (empty($this->accountSid) || empty($this->authToken)) {
+            error_log('Twilio credentials are not configured.');
+            return false;
         }
 
-        // Format phone number (remove non-numeric characters, ensure it starts with +)
-        $phoneNumber = preg_replace('/[^0-9]/', '', $phoneNumber);
-        if (!str_starts_with($phoneNumber, '+')) {
-            $phoneNumber = '+' . $phoneNumber;
+        if (empty($this->fromNumber) && empty($this->messagingServiceSid)) {
+            error_log('Twilio sender is not configured. Set TWILIO_PHONE_NUMBER or TWILIO_MESSAGING_SERVICE_SID.');
+            return false;
+        }
+
+        $phoneNumber = $this->formatPhoneNumber($phoneNumber);
+        if ($phoneNumber === null) {
+            error_log('Invalid SMS recipient phone number.');
+            return false;
         }
 
         error_log('Formatted phone number: ' . $phoneNumber);
 
         $url = "https://api.twilio.com/2010-04-01/Accounts/{$this->accountSid}/Messages.json";
 
-        $postData = http_build_query([
-            'From' => $this->fromNumber,
+        $payload = [
             'To' => $phoneNumber,
             'Body' => $message
-        ]);
+        ];
+
+        if ($this->messagingServiceSid !== '') {
+            $payload['MessagingServiceSid'] = $this->messagingServiceSid;
+        } else {
+            $payload['From'] = $this->fromNumber;
+        }
+
+        $postData = http_build_query($payload);
 
         error_log('Twilio API URL: ' . $url);
         error_log('POST data: From=' . $this->fromNumber . ', To=' . $phoneNumber);
@@ -116,5 +129,28 @@ class SmsService
     public function getSmsLogs(int $limit = 50): array
     {
         return [];
+    }
+
+    private function formatPhoneNumber(string $phoneNumber): ?string
+    {
+        $phoneNumber = trim($phoneNumber);
+        $hasPlus = str_starts_with($phoneNumber, '+');
+        $digits = preg_replace('/\D/', '', $phoneNumber) ?? '';
+
+        if ($digits === '') {
+            return null;
+        }
+
+        if ($hasPlus) {
+            $formatted = '+' . $digits;
+        } elseif (str_starts_with($digits, '00')) {
+            $formatted = '+' . substr($digits, 2);
+        } elseif (str_starts_with($digits, '0')) {
+            $formatted = '+44' . substr($digits, 1);
+        } else {
+            $formatted = '+' . $digits;
+        }
+
+        return preg_match('/^\+[1-9]\d{6,14}$/', $formatted) ? $formatted : null;
     }
 }

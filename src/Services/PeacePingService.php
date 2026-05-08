@@ -13,7 +13,8 @@ class PeacePingService
         private readonly Fingerprint $fingerprint,
         private readonly UserService $userService,
         private readonly NotificationService $notificationService,
-        private readonly string $pepper
+        private readonly string $pepper,
+        private readonly string $portalUrl = ''
     ) {}
 
     public function submitPing(int $userId, string $targetIdentifier): array
@@ -46,10 +47,10 @@ class PeacePingService
 
         $reversePing = $this->db->prepare(
             'SELECT user_id FROM pings
-             WHERE fingerprint_target = ? AND user_id != ?
+             WHERE fingerprint_self = ? AND fingerprint_target = ? AND user_id != ?
              ORDER BY created_at DESC LIMIT 1'
         );
-        $reversePing->bind_param('si', $userFingerprint, $userId);
+        $reversePing->bind_param('ssi', $fingerprintTarget, $userFingerprint, $userId);
         $reversePing->execute();
         $reverseResult = $reversePing->get_result();
 
@@ -64,7 +65,7 @@ class PeacePingService
                 return [
                     'matched' => true,
                     'match_id' => $matchId,
-                    'message' => 'Peace Ping matched! Check your SMS for the next steps.'
+                    'message' => 'Peace Ping matched. Please check your SMS for a private update.'
                 ];
             }
         }
@@ -72,7 +73,7 @@ class PeacePingService
 
         return [
             'matched' => false,
-            'message' => 'Peace Ping sent! If they also send you one, you\'ll both receive SMS messages with secure links to share your reconnection preferences.'
+            'message' => 'Peace Ping sent. If they also enter your number, you will both receive a private update.'
         ];
     }
 
@@ -95,15 +96,12 @@ class PeacePingService
         }
 
         $isExpired = strtotime((string) $row['expires_at']) <= time();
-        $otherUserId = ((int) $row['user_a_id'] === (int) $row['user_id']) ? (int) $row['user_b_id'] : (int) $row['user_a_id'];
-        $otherUser = $otherUserId > 0 ? $this->userService->getUserById($otherUserId) : null;
-
         return [
             'user_id' => (int) $row['user_id'],
             'match_id' => (int) $row['match_id'],
             'is_used' => (bool) $row['is_used'],
             'is_expired' => $isExpired,
-            'other_name' => $this->displayName($otherUser['name'] ?? null),
+            'other_name' => 'the other person',
         ];
     }
 
@@ -154,18 +152,16 @@ class PeacePingService
         $stmt->execute();
         $stmt->close();
 
-        $userA = $this->userService->getUserById($userAId);
-        $userB = $this->userService->getUserById($userBId);
         $contactA = $this->userService->getUserContact($userAId);
         $contactB = $this->userService->getUserContact($userBId);
 
         if ($contactA !== null) {
-            $messageA = $this->buildStage2Message($this->displayName($userB['name'] ?? null), $this->buildPreferenceUrl($tokenA));
+            $messageA = $this->buildPrivateUpdateMessage($this->buildPreferenceUrl($tokenA));
             $this->notificationService->sendSmsMessage($contactA, $messageA);
         }
 
         if ($contactB !== null) {
-            $messageB = $this->buildStage2Message($this->displayName($userA['name'] ?? null), $this->buildPreferenceUrl($tokenB));
+            $messageB = $this->buildPrivateUpdateMessage($this->buildPreferenceUrl($tokenB));
             $this->notificationService->sendSmsMessage($contactB, $messageB);
         }
     }
@@ -216,18 +212,16 @@ class PeacePingService
         $preferenceCheck->close();
 
         if ($preferenceCount === 2) {
-            $this->sendStage3Messages((int) $tokenData['match_id']);
+            $matchId = (int) $tokenData['match_id'];
+            $this->sendStage3Messages($matchId);
 
-            $stmt = $this->db->prepare('UPDATE matches SET stage = 4, completed_at = NOW() WHERE id = ?');
-            $stmt->bind_param('i', $tokenData['match_id']);
-            $stmt->execute();
-            $stmt->close();
+            $this->resetMatch($matchId);
         }
 
         return [
             'success' => true,
             'message' => $preferenceCount === 2
-                ? 'Thank you. Both private preferences are in, and the final message has been sent.'
+                ? 'Thank you. Both private preferences are in, and the final update has been sent.'
                 : 'Thank you. Your private preference has been recorded. We will send the final message once both people have responded.'
         ];
     }
@@ -249,7 +243,7 @@ class PeacePingService
             return;
         }
 
-        $message = $this->determineFinalMessage($preferences[0]['preference'], $preferences[1]['preference']);
+        $message = $this->buildPrivateUpdateMessage($this->getPortalUrl());
 
         foreach ($preferences as $pref) {
             $userId = (int) $pref['user_id'];
@@ -277,22 +271,86 @@ class PeacePingService
         return "There is mutual openness to reconnecting.\nIf contact happens, it can be assumed to be welcome.";
     }
 
-    private function buildStage2Message(string $otherName, string $link): string
+    private function buildPrivateUpdateMessage(string $url): string
     {
-        return "You and {$otherName} have both indicated openness to reconnecting.\nHow would you like this to proceed?\n\nVisit preference page: {$link}";
+        return 'Peace Ping: You have a private update. Please log in to the web portal at ' . $url;
     }
 
     private function buildPreferenceUrl(string $token): string
     {
-        return rtrim($this->getBaseUrl(), '/') . '/preferences?token=' . $token;
+        return rtrim($this->getPortalUrl(), '/') . '/preferences?token=' . $token;
     }
 
-    private function getBaseUrl(): string
+    private function getPortalUrl(): string
     {
+        if ($this->portalUrl !== '') {
+            return $this->portalUrl;
+        }
+
         $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 
         return $scheme . '://' . $host;
+    }
+
+    private function resetMatch(int $matchId): void
+    {
+        $match = $this->getMatchById($matchId);
+        if ($match === null) {
+            return;
+        }
+
+        $this->db->begin_transaction();
+
+        try {
+            $deletePreferences = $this->db->prepare('DELETE FROM match_preferences WHERE match_id = ?');
+            $deletePreferences->bind_param('i', $matchId);
+            $deletePreferences->execute();
+            $deletePreferences->close();
+
+            $deleteTokens = $this->db->prepare('DELETE FROM match_tokens WHERE match_id = ?');
+            $deleteTokens->bind_param('i', $matchId);
+            $deleteTokens->execute();
+            $deleteTokens->close();
+
+            $deleteMatch = $this->db->prepare('DELETE FROM matches WHERE id = ?');
+            $deleteMatch->bind_param('i', $matchId);
+            $deleteMatch->execute();
+            $deleteMatch->close();
+
+            $deletePings = $this->db->prepare(
+                'DELETE FROM pings
+                 WHERE (fingerprint_self = ? AND fingerprint_target = ?)
+                    OR (fingerprint_self = ? AND fingerprint_target = ?)'
+            );
+            $deletePings->bind_param(
+                'ssss',
+                $match['fingerprint_a'],
+                $match['fingerprint_b'],
+                $match['fingerprint_b'],
+                $match['fingerprint_a']
+            );
+            $deletePings->execute();
+            $deletePings->close();
+
+            $this->db->commit();
+        } catch (\Throwable $exception) {
+            $this->db->rollback();
+            throw $exception;
+        }
+    }
+
+    private function getMatchById(int $matchId): ?array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT id, fingerprint_a, fingerprint_b FROM matches WHERE id = ? LIMIT 1'
+        );
+        $stmt->bind_param('i', $matchId);
+        $stmt->execute();
+        $match = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $match ?: null;
     }
 
     private function displayName(?string $name): string

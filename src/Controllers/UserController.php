@@ -58,17 +58,11 @@ class UserController
 
     private function handleRegister(array $input): void
     {
-        $name = trim($input['name'] ?? '');
         $phone = trim($input['phone'] ?? '');
+        $name = trim($input['name'] ?? 'Peace Ping User');
 
-        if ($name === '' || $phone === '') {
-            Response::json(['error' => 'Name and phone number are required.'], 400);
-            return;
-        }
-
-        // Additional validation
-        if (strlen($name) < 2 || strlen($name) > 120) {
-            Response::json(['error' => 'Name must be between 2 and 120 characters.'], 400);
+        if ($phone === '') {
+            Response::json(['error' => 'Mobile number is required.'], 400);
             return;
         }
 
@@ -78,11 +72,6 @@ class UserController
         }
 
         $result = $this->userService->register($name, $phone);
-
-        // Send verification code via Twilio
-        if (isset($result['verification_code'])) {
-            $this->smsService->sendVerificationCode($phone, $result['verification_code']);
-        }
 
         Response::json($result);
     }
@@ -102,7 +91,13 @@ class UserController
         }
 
         try {
-            $result = $this->userService->verifyAndCreate($code);
+            if (session_status() === PHP_SESSION_NONE) {
+                session_start();
+            }
+            $pendingUserId = isset($_SESSION['pending_verification_user_id'])
+                ? (int) $_SESSION['pending_verification_user_id']
+                : null;
+            $result = $this->userService->verifyAndCreate($code, $pendingUserId);
             Response::json($result);
         } catch (Exception $e) {
             error_log('Verification error: ' . $e->getMessage());

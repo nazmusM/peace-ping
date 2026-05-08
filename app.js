@@ -61,7 +61,7 @@ if (phoneInput) {
     phoneInput.addEventListener('input', debounce(function (e) {
         const value = e.target.value;
         if (value && !validatePhone(value)) {
-            e.target.setCustomValidity('Please enter a valid UK mobile number (07xxx xxxxxx or +447xx xxxxxx)');
+            e.target.setCustomValidity('Please enter a valid mobile number.');
         } else {
             e.target.setCustomValidity('');
         }

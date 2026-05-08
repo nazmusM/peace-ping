@@ -37,7 +37,8 @@ $peacePingService = new PeacePingService(
     $fingerprint,
     $userService,
     $notificationService,
-    $config['security']['pepper']
+    $config['security']['pepper'],
+    $config['notifications']['portal_url'] ?? ''
 );
 $rateLimiter = new RateLimiter(
     $db,
@@ -335,10 +336,6 @@ if ($path === '/register') {
                 <h2>📱 Register Your Account</h2>
                 <form id="register-form">
                     <div class="form-group">
-                        <label for="register-name">Your Name</label>
-                        <input id="register-name" name="name" type="text" required placeholder="John Smith">
-                    </div>
-                    <div class="form-group">
                         <label for="register-phone">Mobile Number</label>
                         <input type="tel" id="register-phone" name="phone" placeholder="+1234567890 or 1234567890" required>
                         <small>International format: +1234567890 or local format: 1234567890. Your number is encrypted and never shared.</small>
@@ -415,11 +412,10 @@ if ($path === '/register') {
         registerForm.addEventListener("submit", async (event) => {
             event.preventDefault();
 
-            const name = document.getElementById("register-name").value.trim();
             const phone = document.getElementById("register-phone").value.trim();
 
-            if (name === '' || phone === '') {
-                showResult(registerResult, "Please fill in all fields.", "warn");
+            if (phone === '') {
+                showResult(registerResult, "Please enter your mobile number.", "warn");
                 return;
             }
 
@@ -427,7 +423,6 @@ if ($path === '/register') {
 
             const response = await postJson("api/register", {
                 action: 'register',
-                name: name,
                 phone: phone
             });
 
@@ -687,7 +682,7 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
 
                     <div class="preference-card" data-preference="prefer_other">
                         <span class="preference-icon">B</span>
-                        <div class="preference-title">I'd prefer the other person reach out</div>
+                        <div class="preference-title">I prefer the other person to reach out first</div>
                         <div class="preference-description">
                             Your selection stays private. It is never shown to the other person and never used to assign responsibility.
                         </div>

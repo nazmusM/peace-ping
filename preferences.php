@@ -15,7 +15,14 @@ $encryption = new Encryption($config['security']['encryption_key'] ?? '');
 $smsService = new SmsService($config);
 $notificationService = new NotificationService($smsService, $encryption);
 $userService = new UserService($db, new \App\Fingerprint(), $encryption, $notificationService, $config['security']['pepper']);
-$peacePingService = new PeacePingService($db, new \App\Fingerprint(), $userService, $notificationService, $config['security']['pepper']);
+$peacePingService = new PeacePingService(
+    $db,
+    new \App\Fingerprint(),
+    $userService,
+    $notificationService,
+    $config['security']['pepper'],
+    $config['notifications']['portal_url'] ?? ''
+);
 
 // Get token from URL
 $token = $_GET['token'] ?? '';
@@ -159,8 +166,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <main class="container" style="padding: var(--space-xl) var(--space-md);">
         <div class="page-header">
-            <h1>🕊️ Peace Ping Match!</h1>
-            <p>Someone you're thinking about is also thinking about you. Please share your preferences for reconnecting.</p>
+            <h1>Peace Ping Private Update</h1>
+            <p>Please share your private preference for how you would like this to proceed.</p>
         </div>
 
         <?php if ($success): ?>
@@ -192,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <div class="preference-card" data-preference="prefer_other">
                         <span class="preference-icon">🙏</span>
-                        <div class="preference-title">I prefer the other person to reach out</div>
+                        <div class="preference-title">I prefer the other person to reach out first</div>
                         <div class="preference-description">
                             I'd be more comfortable if the other person initiates the reconnection. I'm open to reconnecting but prefer they take the lead.
                         </div>

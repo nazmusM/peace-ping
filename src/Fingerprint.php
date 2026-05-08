@@ -8,7 +8,7 @@ class Fingerprint
 {
     public function normalize(string $identifier): string
     {
-        return strtolower(trim($identifier));
+        return $this->formatPhone($identifier);
     }
 
     /**
@@ -28,16 +28,27 @@ class Fingerprint
      */
     public function formatPhone(string $phone): string
     {
-        // Remove all non-digit characters except +
-        $phone = preg_replace('/[^0-9+]/', '', $phone);
+        $phone = trim($phone);
+        $hasPlus = str_starts_with($phone, '+');
+        $digits = preg_replace('/\D/', '', $phone) ?? '';
 
-        // If no + prefix, assume it's a local number
-        if (!str_starts_with($phone, '+')) {
-            // Just return as-is for local numbers
-            return $phone;
+        if ($digits === '') {
+            return '';
         }
 
-        return $phone;
+        if ($hasPlus) {
+            return '+' . $digits;
+        }
+
+        if (str_starts_with($digits, '00')) {
+            return '+' . substr($digits, 2);
+        }
+
+        if (str_starts_with($digits, '0')) {
+            return '+44' . substr($digits, 1);
+        }
+
+        return '+' . $digits;
     }
 
     public function fingerprint(string $identifier, string $pepper): string

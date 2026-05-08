@@ -11,8 +11,9 @@ $db->begin_transaction();
 
 try {
     $statements = [
-        'DELETE FROM preferences WHERE created_at < (NOW() - INTERVAL 30 DAY)',
-        'DELETE FROM notifications WHERE created_at < (NOW() - INTERVAL 30 DAY)',
+        'DELETE FROM match_preferences WHERE submitted_at < (NOW() - INTERVAL 30 DAY)',
+        'DELETE FROM preferences WHERE submitted_at < (NOW() - INTERVAL 30 DAY)',
+        'DELETE FROM match_tokens WHERE expires_at < NOW()',
         'DELETE FROM matches WHERE created_at < (NOW() - INTERVAL 30 DAY)',
         'DELETE FROM pings WHERE created_at < (NOW() - INTERVAL 30 DAY)',
         'DELETE FROM rate_limits WHERE created_at < (NOW() - INTERVAL 2 DAY)',
