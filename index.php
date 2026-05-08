@@ -13,7 +13,6 @@ use App\Services\NotificationService;
 use App\Services\UserService;
 use App\Services\PingService;
 use App\Services\PeacePingService;
-use App\Services\InboxService;
 use App\Controllers\UserController;
 use App\Controllers\PingController;
 
@@ -33,13 +32,11 @@ $pingService = new PingService(
     $notificationService,
     $config['security']['pepper']
 );
-$inboxService = new InboxService($db);
 $peacePingService = new PeacePingService(
     $db,
     $fingerprint,
     $userService,
     $notificationService,
-    $inboxService,
     $config['security']['pepper']
 );
 $rateLimiter = new RateLimiter(
@@ -48,10 +45,10 @@ $rateLimiter = new RateLimiter(
     (int) $config['rate_limit']['max_pings_per_hour']
 );
 
-// Enable error reporting for production debugging
-ini_set('display_errors', 1);
-ini_set('log_errors', 1);
-error_reporting(E_ALL);
+// Error reporting configuration
+ini_set('display_errors', 0);  // Don't display errors to users
+ini_set('log_errors', 1);      // Log errors to file
+error_reporting(E_ALL);        // Report all errors
 
 // Custom error handler for production
 set_error_handler(function ($severity, $message, $file, $line) {
@@ -81,6 +78,21 @@ set_error_handler(function ($severity, $message, $file, $line) {
     return false;
 });
 
+// Security headers
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('X-XSS-Protection: 1; mode=block');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+
+// Session security configuration
+if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.cookie_httponly', 1);
+    ini_set('session.cookie_secure', 0);  // Set to 1 if using HTTPS
+    ini_set('session.use_strict_mode', 1);
+    ini_set('session.cookie_samesite', 'Strict');
+}
+
 // Page content functions
 function renderPage(string $title, string $content, string $page = 'home'): void
 {
@@ -89,7 +101,6 @@ function renderPage(string $title, string $content, string $page = 'home'): void
         'how-it-works' => 'How It Works',
         'register' => 'Register & Verify',
         'ping' => 'Send Ping',
-        'inbox' => 'SMS Inbox',
         'contact' => 'Contact'
     ];
 
@@ -100,6 +111,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self';">
         <meta name="description" content="Peace Ping - Reconnect with people you care about through anonymous, thoughtful communication">
         <meta name="keywords" content="reconnect, communication, peace, anonymous, thoughtful">
         <meta name="author" content="Peace Ping">
@@ -121,8 +133,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                     <?php foreach ($activeNav as $route => $label): ?>
                         <li>
                             <a href="/<?php echo $route; ?>"
-                                <?php echo $route === $page ? 'class="active"' : ''; ?>
-                                <?php echo $route === 'inbox' ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>>
+                                <?php echo $route === $page ? 'class="active"' : ''; ?>>
                                 <?php echo htmlspecialchars($label); ?>
                             </a>
                         </li>
@@ -137,7 +148,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
 
         <footer class="footer">
             <div class="container">
-                <p>&copy; 2024 Peace Ping. Reconnecting people thoughtfully.</p>
+                <p>&copy; <?php echo date('Y') ?> Peace Ping. Reconnecting people thoughtfully.</p>
             </div>
         </footer>
     </body>
@@ -163,9 +174,6 @@ function renderSmsMessage(string $message): string
 
 // API Routes
 if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
-    // Debug: Log API request
-    error_log("DEBUG: API request - Method: " . ($_SERVER['REQUEST_METHOD'] ?? 'NULL') . ", URI: " . ($_SERVER['REQUEST_URI'] ?? 'NULL'));
-
     $method = $_SERVER['REQUEST_METHOD'];
     $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '/';
 
@@ -173,34 +181,26 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
         Response::json(['error' => 'Not found.'], 404);
         exit;
     }
-
+
 
     if ($path === '/api/register') {
-        error_log("DEBUG: Handling register request");
-        $userController = new UserController($userService, $inboxService);
-        $userController->handle();
+        try {
+            $rateLimiter->enforcePingLimit($_SERVER['REMOTE_ADDR']);
+            $userController = new UserController($userService, $smsService);
+            $userController->handle();
+        } catch (RuntimeException $e) {
+            Response::json(['error' => $e->getMessage()], 429);
+        }
         exit;
     }
 
     if ($path === '/api/ping') {
-        error_log("DEBUG: Handling ping request");
-
-        // Debug: Check if services are initialized
-        error_log("DEBUG: peacePingService exists: " . (isset($peacePingService) ? 'YES' : 'NO'));
-        error_log("DEBUG: rateLimiter exists: " . (isset($rateLimiter) ? 'YES' : 'NO'));
-
         try {
-            $pingController = new PingController($peacePingService, $rateLimiter);
-            error_log("DEBUG: PingController created successfully");
-
+            $pingController = new PingController($peacePingService, $rateLimiter, $userService);
             $pingController->handle($_SERVER['REMOTE_ADDR']);
-            error_log("DEBUG: PingController handle completed");
         } catch (Exception $e) {
-            error_log("DEBUG: Exception in ping controller: " . $e->getMessage());
-            Response::json(['error' => 'Internal server error: ' . $e->getMessage()], 500);
-        } catch (Error $e) {
-            error_log("DEBUG: Error in ping controller: " . $e->getMessage());
-            Response::json(['error' => 'Internal server error: ' . $e->getMessage()], 500);
+            error_log('Ping controller error: ' . $e->getMessage());
+            Response::json(['error' => 'Internal server error.'], 500);
         }
         exit;
     }
@@ -558,118 +558,6 @@ if ($path === '/ping') {
     exit;
 }
 
-// SMS Inbox page - PUBLIC for testing
-if ($path === '/inbox') {
-    // No login required - completely public for testing
-    session_start();
-    $userId = $_SESSION['user_id'] ?? null;
-    $user = null;
-
-    // Get messages - always show all messages for testing
-    $messages = [];
-    try {
-        if ($userId) {
-            // If logged in, get user's messages first, then add recent ones
-            $userMessages = $inboxService->getUserMessages($userId, 100);
-            $allMessages = $inboxService->getAllMessages(50);
-            $user = $userService->getUserById($userId);
-
-            // Combine and deduplicate
-            $messages = $allMessages;
-        } else {
-            // Always show all messages for testing
-            $messages = $inboxService->getAllMessages(50);
-        }
-    } catch (Exception $e) {
-        // Debug: show error info
-        $messages = [[
-            'phone_number' => 'DEBUG',
-            'message' => 'Error: ' . $e->getMessage(),
-            'direction' => 'outbound',
-            'status' => 'error',
-            'created_at' => date('Y-m-d H:i:s')
-        ]];
-    }
-
-    ob_start();
-?>
-    <div class="inbox-page">
-        <div class="page-header">
-            <h1>📱 SMS Inbox</h1>
-            <p>View all SMS messages including verification codes and match notifications</p>
-            <?php if ($user): ?>
-                <p class="user-info">Logged in as: <strong><?php echo htmlspecialchars($user['name']); ?></strong></p>
-            <?php else: ?>
-                <p class="testing-mode">🧪 <strong>Testing Mode:</strong> Showing all messages for verification testing</p>
-            <?php endif; ?>
-        </div>
-
-        <?php if (empty($messages)): ?>
-            <div class="empty-state card">
-                <div class="empty-state-icon">📭</div>
-                <h3>No messages yet</h3>
-                <p>Register and send Peace Pings to see verification codes and match notifications here.</p>
-                <?php if (!$user): ?>
-                    <a href="/register" class="btn">Register Now</a>
-                <?php else: ?>
-                    <a href="/ping" class="btn">Send a Peace Ping</a>
-                <?php endif; ?>
-            </div>
-        <?php else: ?>
-            <div class="messages-list">
-                <?php foreach ($messages as $msg): ?>
-                    <div class="message-card <?php echo $msg['direction']; ?>">
-                        <div class="message-header">
-                            <div class="message-info">
-                                <span class="phone-number"><?php echo htmlspecialchars($msg['phone_number']); ?></span>
-                                <span class="message-time"><?php echo date('M j, Y \a\t g:i A', strtotime($msg['created_at'])); ?></span>
-                            </div>
-                            <div class="message-direction">
-                                <?php if ($msg['direction'] === 'inbound'): ?>
-                                    <span class="direction-badge inbound">📥 Inbound</span>
-                                <?php else: ?>
-                                    <span class="direction-badge outbound">📤 Outbound</span>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <div class="message-content">
-                            <?php echo renderSmsMessage($msg['message']); ?>
-                        </div>
-                        <div class="message-footer">
-                            <span class="status-badge status-<?php echo $msg['status']; ?>">
-                                <?php echo ucfirst($msg['status']); ?>
-                            </span>
-                            <?php if (isset($msg['user_id']) && $msg['user_id']): ?>
-                                <span class="user-badge">User ID: <?php echo $msg['user_id']; ?></span>
-                            <?php else: ?>
-                                <span class="user-badge pending">Pending Registration</span>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-
-        <div class="inbox-info card" style="margin-top: var(--space-2xl);">
-            <h3>🔍 About This Inbox</h3>
-            <p>This is a <strong>public testing inbox</strong> that shows all SMS messages sent by the Peace Ping system:</p>
-            <ul>
-                <li><strong>Verification Codes:</strong> When users register, their verification codes appear here</li>
-                <li><strong>Match Notifications:</strong> When Peace Pings match, both users receive match notifications</li>
-                <li><strong>Test Messages:</strong> All messages are logged here for easy testing and debugging</li>
-            </ul>
-            <?php if (!$user): ?>
-                <p style="margin-top: var(--space-lg);">
-                    <strong>For full testing:</strong> <a href="/register">Register an account</a> to see how verification codes work.
-                </p>
-            <?php endif; ?>
-        </div>
-    </div>
-<?php
-    $content = ob_get_clean();
-    renderPage('SMS Inbox', $content, 'inbox');
-    exit;
-}
 
 // Contact page
 if ($path === '/contact') {
@@ -834,7 +722,7 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
 
         if (form && submitBtn) {
             preferenceCards.forEach((card) => {
-                card.addEventListener('click', function () {
+                card.addEventListener('click', function() {
                     preferenceCards.forEach((item) => item.classList.remove('selected'));
                     this.classList.add('selected');
                     selectedPreference = this.dataset.preference;
@@ -852,7 +740,7 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
                 });
             });
 
-            form.addEventListener('submit', function (event) {
+            form.addEventListener('submit', function(event) {
                 if (!selectedPreference) {
                     event.preventDefault();
                     alert('Please select a preference before submitting.');

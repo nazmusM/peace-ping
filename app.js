@@ -111,7 +111,7 @@ pingForm.addEventListener("submit", async (event) => {
         if (response.body.matched) {
             // Show match found with success message
             matchInfo.hidden = false;
-            matchMessage.textContent = "🎉 Match found! Check the SMS Inbox for your private preference link.";
+            matchMessage.textContent = "🎉 Match found! Check your SMS for the private preference link.";
 
             showResult(resultEl, "🎉 Match found! Check your SMS for the private link.", "ok");
         } else {

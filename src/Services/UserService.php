@@ -182,7 +182,7 @@ class UserService
     public function getUserByContactHash(string $contactHash): ?array
     {
         $select = $this->db->prepare(
-            'SELECT id, name, contact_encrypted, contact_hash, created_at FROM users WHERE contact_hash = ? LIMIT 1'
+            'SELECT id, name, contact_encrypted, contact_hash, is_verified, created_at FROM users WHERE contact_hash = ? LIMIT 1'
         );
         $select->bind_param('s', $contactHash);
         $select->execute();

@@ -3,7 +3,7 @@
 namespace App\Controllers;
 
 use App\Services\UserService;
-use App\Services\InboxService;
+use App\Services\SmsService;
 use App\Utils\Response;
 use InvalidArgumentException;
 use Exception;
@@ -12,7 +12,7 @@ class UserController
 {
     public function __construct(
         private readonly UserService $userService,
-        private readonly InboxService $inboxService
+        private readonly SmsService $smsService
     ) {}
 
     /**
@@ -66,11 +66,22 @@ class UserController
             return;
         }
 
+        // Additional validation
+        if (strlen($name) < 2 || strlen($name) > 120) {
+            Response::json(['error' => 'Name must be between 2 and 120 characters.'], 400);
+            return;
+        }
+
+        if (strlen($phone) < 10 || strlen($phone) > 20) {
+            Response::json(['error' => 'Phone number must be between 10 and 20 characters.'], 400);
+            return;
+        }
+
         $result = $this->userService->register($name, $phone);
 
-        // Log verification code for testing (use actual user_id)
-        if (isset($result['user_id']) && isset($result['verification_code'])) {
-            $this->inboxService->logVerificationCode($result['user_id'], $phone, $result['verification_code']);
+        // Send verification code via Twilio
+        if (isset($result['verification_code'])) {
+            $this->smsService->sendVerificationCode($phone, $result['verification_code']);
         }
 
         Response::json($result);
@@ -82,6 +93,11 @@ class UserController
 
         if ($code === '') {
             Response::json(['error' => 'Verification code is required.'], 400);
+            return;
+        }
+
+        if (!preg_match('/^[0-9]{6}$/', $code)) {
+            Response::json(['error' => 'Verification code must be exactly 6 digits.'], 400);
             return;
         }
 

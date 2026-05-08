@@ -9,9 +9,7 @@ use Throwable;
 
 class PreferenceController
 {
-    public function __construct(private readonly PreferenceService $preferenceService)
-    {
-    }
+    public function __construct(private readonly PreferenceService $preferenceService) {}
 
     public function handle(): void
     {
@@ -23,10 +21,30 @@ class PreferenceController
                 return;
             }
 
+            $self = trim($payload['self']);
+            $target = trim($payload['target']);
+            $preference = trim($payload['preference']);
+
+            if (empty($self) || empty($target) || empty($preference)) {
+                Response::json(['error' => 'All fields are required and cannot be empty.'], 400);
+                return;
+            }
+
+            if (strlen($self) < 10 || strlen($self) > 20 || strlen($target) < 10 || strlen($target) > 20) {
+                Response::json(['error' => 'Phone numbers must be between 10 and 20 characters.'], 400);
+                return;
+            }
+
+            $validPreferences = ['comfortable', 'prefer_other', 'either'];
+            if (!in_array($preference, $validPreferences, true)) {
+                Response::json(['error' => 'Invalid preference value.'], 400);
+                return;
+            }
+
             $result = $this->preferenceService->submitPreference(
-                (string) $payload['self'],
-                (string) $payload['target'],
-                (string) $payload['preference']
+                $self,
+                $target,
+                $preference
             );
             Response::json($result, 200);
         } catch (InvalidArgumentException $exception) {

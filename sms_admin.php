@@ -21,8 +21,8 @@ switch ($action) {
     case 'logs':
         echo json_encode([
             'logs' => $smsService->getSmsLogs(20),
-            'mode' => 'inbox_only',
-            'message' => 'File-based SMS logs are disabled. Review messages in the SMS inbox instead.'
+            'mode' => 'twilio_direct',
+            'message' => 'SMS is sent directly via Twilio API. No file-based logs available.'
         ], JSON_PRETTY_PRINT);
         break;
 
@@ -30,4 +30,3 @@ switch ($action) {
         http_response_code(400);
         echo json_encode(['error' => 'Invalid action'], JSON_PRETTY_PRINT);
 }
-?>

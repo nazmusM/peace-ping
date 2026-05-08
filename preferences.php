@@ -8,7 +8,6 @@ use App\Utils\Encryption;
 use App\Services\NotificationService;
 use App\Services\UserService;
 use App\Services\PeacePingService;
-use App\Services\InboxService;
 
 // Initialize services
 $db = Database::getConnection($config['db']);
@@ -16,8 +15,7 @@ $encryption = new Encryption($config['security']['encryption_key'] ?? '');
 $smsService = new SmsService($config);
 $notificationService = new NotificationService($smsService, $encryption);
 $userService = new UserService($db, new \App\Fingerprint(), $encryption, $notificationService, $config['security']['pepper']);
-$inboxService = new InboxService($db);
-$peacePingService = new PeacePingService($db, new \App\Fingerprint(), $userService, $notificationService, $inboxService, $config['security']['pepper']);
+$peacePingService = new PeacePingService($db, new \App\Fingerprint(), $userService, $notificationService, $config['security']['pepper']);
 
 // Get token from URL
 $token = $_GET['token'] ?? '';

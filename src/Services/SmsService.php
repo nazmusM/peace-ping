@@ -1,6 +1,6 @@
 <?php
+
 namespace App\Services;
-require __DIR__ . '/../../vendor/autoload.php';
 
 class SmsService
 {
@@ -12,7 +12,7 @@ class SmsService
     {
         $this->accountSid = $config['twilio']['account_sid'] ?? '';
         $this->authToken = $config['twilio']['auth_token'] ?? '';
-        $this->fromNumber = $config['twilio']['phone_number'] ?? '';
+        $this->fromNumber = 'PeacePing'; // Use a friendly name for the sender ID in staging
     }
 
     /**
@@ -97,8 +97,8 @@ class SmsService
     {
         return [
             'queued_count' => 0,
-            'mode' => 'inbox_only',
-            'message' => 'File-based SMS queue/logging is disabled. Use the SMS inbox for testing.'
+            'mode' => 'twilio_direct',
+            'message' => 'SMS is sent directly via Twilio API.'
         ];
     }
 
@@ -108,8 +108,8 @@ class SmsService
             'processed' => 0,
             'failed' => 0,
             'total' => 0,
-            'mode' => 'inbox_only',
-            'message' => 'No SMS queue is processed in staging. Messages are tested through the inbox system.'
+            'mode' => 'twilio_direct',
+            'message' => 'SMS is sent directly via Twilio API. No queue processing needed.'
         ];
     }
 

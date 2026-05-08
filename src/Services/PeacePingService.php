@@ -13,15 +13,11 @@ class PeacePingService
         private readonly Fingerprint $fingerprint,
         private readonly UserService $userService,
         private readonly NotificationService $notificationService,
-        private readonly InboxService $inboxService,
         private readonly string $pepper
-    ) {
-        error_log('DEBUG: PeacePingService constructor called');
-    }
+    ) {}
 
     public function submitPing(int $userId, string $targetIdentifier): array
     {
-        error_log("DEBUG: submitPing called - userId: $userId, target: $targetIdentifier");
 
         $userContact = $this->userService->getUserContact($userId);
         if ($userContact === null) {
@@ -166,13 +162,11 @@ class PeacePingService
         if ($contactA !== null) {
             $messageA = $this->buildStage2Message($this->displayName($userB['name'] ?? null), $this->buildPreferenceUrl($tokenA));
             $this->notificationService->sendSmsMessage($contactA, $messageA);
-            $this->inboxService->logMessage($userAId, $contactA, $messageA);
         }
 
         if ($contactB !== null) {
             $messageB = $this->buildStage2Message($this->displayName($userA['name'] ?? null), $this->buildPreferenceUrl($tokenB));
             $this->notificationService->sendSmsMessage($contactB, $messageB);
-            $this->inboxService->logMessage($userBId, $contactB, $messageB);
         }
     }
 
@@ -262,7 +256,6 @@ class PeacePingService
             $contact = $this->userService->getUserContact($userId);
             if ($contact !== null) {
                 $this->notificationService->sendSmsMessage($contact, $message);
-                $this->inboxService->logMessage($userId, $contact, $message);
             }
         }
     }
