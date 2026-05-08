@@ -12,7 +12,7 @@ class SmsService
     {
         $this->accountSid = $config['twilio']['account_sid'] ?? '';
         $this->authToken = $config['twilio']['auth_token'] ?? '';
-        $this->fromNumber = 'PeacePing'; // Use a friendly name for the sender ID in staging
+        $this->fromNumber = $config['twilio']['phone_number'] ?? 'PeacePing'; // Use a friendly name for the sender ID in staging
     }
 
     /**
