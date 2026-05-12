@@ -1,13 +1,11 @@
 <?php
-
+$env = getenv('ENV') ?: 'development';
 return [
     'db' => [
-        'host' => getenv('DB_HOST') ?: '127.0.0.1',
-        'database' => getenv('DB_NAME') ?: 'peace_ping',
-        'user' => getenv('DB_USER') ?: 'root',
-        'password' => getenv('DB_PASS') ?: (getenv('DB_PASS') ?: ''),
-        'port' => getenv('DB_PORT') ?: '3306',
-        'socket' => getenv('DB_SOCKET') ?: '',
+        'host' => $env=== 'production' ? getenv('DB_HOST') : 'localhost',
+        'database' => $env=== 'production' ? getenv('DB_NAME') : 'peace_ping',
+        'user' => $env=== 'production' ? getenv('DB_USER') : 'root',
+        'password' => $env=== 'production' ? getenv('DB_PASS') :  '',
     ],
 
     'security' => [

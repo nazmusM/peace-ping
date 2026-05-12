@@ -40,9 +40,22 @@ function debounce(func, wait) {
 
 // Form validation helpers
 function validatePhone(phone) {
-    const cleaned = phone.replace(/[^\d\+]/g, '');
-    // Support international format or local format
-    return /^\+[1-9]\d{1,14}$/.test(cleaned) || /^[1-9]\d{6,14}$/.test(cleaned);
+    const trimmed = phone.trim();
+    const digits = trimmed.replace(/\D/g, '');
+
+    if (digits.length < 8 || digits.length > 15) {
+        return false;
+    }
+
+    if (trimmed.startsWith('+')) {
+        return /^\+[1-9][\d\s().-]{7,20}$/.test(trimmed);
+    }
+
+    if (digits.startsWith('00')) {
+        return digits.length >= 10;
+    }
+
+    return /^[0-9\s().-]+$/.test(trimmed);
 }
 
 function validateName(name) {
@@ -61,7 +74,7 @@ if (phoneInput) {
     phoneInput.addEventListener('input', debounce(function (e) {
         const value = e.target.value;
         if (value && !validatePhone(value)) {
-            e.target.setCustomValidity('Please enter a valid mobile number.');
+            e.target.setCustomValidity('Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number].');
         } else {
             e.target.setCustomValidity('');
         }
@@ -81,7 +94,7 @@ pingForm.addEventListener("submit", async (event) => {
     }
 
     if (!validatePhone(target)) {
-        showResult(resultEl, "Please enter a valid phone number (international format: +[country][number] or local format: [number])", "warn");
+        showResult(resultEl, "Please enter a valid mobile number. Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number]. Spaces are fine.", "warn");
         return;
     }
 
@@ -115,7 +128,7 @@ pingForm.addEventListener("submit", async (event) => {
 
             showResult(resultEl, "🎉 Match found! Check your SMS for the private link.", "ok");
         } else {
-            showResult(resultEl, "Peace Ping sent! If they also send you one, you'll both receive SMS messages with secure links to share your reconnection preferences.", "ok");
+            showResult(resultEl, "Peace Ping sent. You can track it from your dashboard; if they also ping you, both of you receive secure links for preferences.", "ok");
         }
     } catch (error) {
         showResult(resultEl, "Error checking login status.", "warn");

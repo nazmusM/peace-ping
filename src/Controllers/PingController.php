@@ -35,8 +35,9 @@ class PingController
                 }
 
                 $target = trim($payload['target']);
-                if (strlen($target) < 10 || strlen($target) > 20) {
-                    Response::json(['error' => 'Phone number must be between 10 and 20 characters.'], 400);
+                $digits = preg_replace('/\D/', '', $target) ?? '';
+                if (strlen($digits) < 8 || strlen($digits) > 15) {
+                    Response::json(['error' => 'Please enter a mobile number as 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number].'], 400);
                     return;
                 }
 

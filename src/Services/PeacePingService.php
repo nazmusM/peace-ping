@@ -215,7 +215,7 @@ class PeacePingService
             $matchId = (int) $tokenData['match_id'];
             $this->sendStage3Messages($matchId);
 
-            $this->resetMatch($matchId);
+            $this->completeMatch($matchId);
         }
 
         return [
@@ -338,6 +338,18 @@ class PeacePingService
             $this->db->rollback();
             throw $exception;
         }
+    }
+
+    private function completeMatch(int $matchId): void
+    {
+        $stmt = $this->db->prepare(
+            "UPDATE matches
+             SET status = 'completed', stage = 3, completed_at = NOW()
+             WHERE id = ?"
+        );
+        $stmt->bind_param('i', $matchId);
+        $stmt->execute();
+        $stmt->close();
     }
 
     private function getMatchById(int $matchId): ?array

@@ -97,11 +97,17 @@ if (session_status() === PHP_SESSION_NONE) {
 // Page content functions
 function renderPage(string $title, string $content, string $page = 'home'): void
 {
+    global $userService;
+
+    $currentUser = $userService->getCurrentUser();
+    $isLoggedIn = $currentUser !== null;
+    $displayContact = $isLoggedIn ? maskMobileNumber((string) ($currentUser['contact'] ?? '')) : '';
     $activeNav = [
         'home' => 'Home',
         'how-it-works' => 'How It Works',
         'register' => 'Register & Verify',
         'ping' => 'Send Ping',
+        'dashboard' => 'Dashboard',
         'contact' => 'Contact'
     ];
 
@@ -129,6 +135,11 @@ function renderPage(string $title, string $content, string $page = 'home'): void
             <nav class="nav">
                 <div class="nav-brand">
                     <h1>Peace Ping</h1>
+                    <?php if ($isLoggedIn): ?>
+                        <span class="account-chip">Signed in as <?php echo htmlspecialchars($displayContact); ?></span>
+                    <?php else: ?>
+                        <span class="account-chip">Not signed in</span>
+                    <?php endif; ?>
                 </div>
                 <ul class="nav-links">
                     <?php foreach ($activeNav as $route => $label): ?>
@@ -139,6 +150,9 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                             </a>
                         </li>
                     <?php endforeach; ?>
+                    <?php if ($isLoggedIn): ?>
+                        <li><button type="button" class="nav-logout" id="logout-button">Logout</button></li>
+                    <?php endif; ?>
                 </ul>
             </nav>
         </header>
@@ -152,10 +166,40 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                 <p>&copy; <?php echo date('Y') ?> Peace Ping. Reconnecting people thoughtfully.</p>
             </div>
         </footer>
+        <?php if ($isLoggedIn): ?>
+            <script>
+                document.getElementById('logout-button')?.addEventListener('click', async () => {
+                    await fetch('/api/register', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            action: 'logout'
+                        })
+                    });
+                    window.location.href = '/';
+                });
+            </script>
+        <?php endif; ?>
     </body>
 
     </html>
 <?php
+}
+
+function maskMobileNumber(string $mobile): string
+{
+    $mobile = trim($mobile);
+    if ($mobile === '') {
+        return 'your account';
+    }
+
+    $visibleStart = str_starts_with($mobile, '+') ? 3 : 2;
+    $start = substr($mobile, 0, $visibleStart);
+    $end = substr($mobile, -3);
+
+    return $start . '...' . $end;
 }
 
 function renderSmsMessage(string $message): string
@@ -173,6 +217,52 @@ function renderSmsMessage(string $message): string
     return nl2br($linked ?? $escaped);
 }
 
+function getDashboardSummary(mysqli $db, int $userId): array
+{
+    $pings = [];
+    $stmt = $db->prepare(
+        "SELECT p.id, p.created_at, p.fingerprint_self, p.fingerprint_target,
+                m.id AS match_id, m.status AS match_status, m.stage, m.completed_at,
+                mt.token, mt.is_used, mt.expires_at,
+                CASE
+                    WHEN m.id IS NULL THEN 'pending'
+                    WHEN m.completed_at IS NOT NULL OR m.status = 'completed' THEN 'completed'
+                    ELSE 'matched'
+                END AS ping_status
+         FROM pings p
+         LEFT JOIN matches m
+           ON (
+               (m.fingerprint_a = p.fingerprint_self AND m.fingerprint_b = p.fingerprint_target)
+               OR (m.fingerprint_a = p.fingerprint_target AND m.fingerprint_b = p.fingerprint_self)
+           )
+         LEFT JOIN match_tokens mt
+           ON mt.match_id = m.id AND mt.user_id = p.user_id AND mt.is_used = 0 AND mt.expires_at > NOW()
+         WHERE p.user_id = ?
+         ORDER BY p.created_at DESC"
+    );
+    $stmt->bind_param('i', $userId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    while ($row = $result->fetch_assoc()) {
+        $pings[] = $row;
+    }
+    $stmt->close();
+
+    $counts = ['pending' => 0, 'matched' => 0, 'completed' => 0];
+    foreach ($pings as $ping) {
+        $status = $ping['ping_status'] ?? 'pending';
+        if (isset($counts[$status])) {
+            $counts[$status]++;
+        }
+    }
+
+    return [
+        'pings' => $pings,
+        'counts' => $counts,
+    ];
+}
+
 // API Routes
 if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
     $method = $_SERVER['REQUEST_METHOD'];
@@ -186,7 +276,6 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
 
     if ($path === '/api/register') {
         try {
-            $rateLimiter->enforcePingLimit($_SERVER['REMOTE_ADDR']);
             $userController = new UserController($userService, $smsService);
             $userController->handle();
         } catch (RuntimeException $e) {
@@ -252,7 +341,7 @@ if ($path === '/' || $path === '/home') {
                 </div>
                 <div class="feature">
                     <h3>🔒 Privacy First</h3>
-                    <p>Your contact information is encrypted and only shared when there's mutual interest.</p>
+                    <p>Numbers used for matching are fingerprinted with a private server secret. Raw submitted target numbers are not stored.</p>
                 </div>
             </div>
         </section>
@@ -308,10 +397,12 @@ if ($path === '/how-it-works') {
             <h2>🔒 Your Privacy Matters</h2>
             <p>Peace Ping is designed with privacy at its core:</p>
             <ul>
-                <li><strong>Encrypted Storage:</strong> Your contact information is encrypted and stored securely</li>
+                <li><strong>Fingerprint Matching:</strong> Submitted numbers are normalized, fingerprinted, and compared as hashes</li>
+                <li><strong>No Raw Target Storage:</strong> Raw numbers entered for matching are not stored after submission</li>
+                <li><strong>Limited Visibility:</strong> The platform cannot read raw submitted target numbers or a raw-number "who wants whom" list</li>
+                <li><strong>Encrypted Account Contact:</strong> Your own verified mobile is encrypted for SMS delivery</li>
                 <li><strong>No Unwanted Contact:</strong> No information is shared unless there's mutual interest</li>
                 <li><strong>You're in Control:</strong> You decide when and how to reconnect</li>
-                <li><strong>Anonymous Until Match:</strong> Your identity remains private until mutual connection</li>
             </ul>
         </div>
     </div>
@@ -337,8 +428,13 @@ if ($path === '/register') {
                 <form id="register-form">
                     <div class="form-group">
                         <label for="register-phone">Mobile Number</label>
-                        <input type="tel" id="register-phone" name="phone" placeholder="+1234567890 or 1234567890" required>
-                        <small>International format: +1234567890 or local format: 1234567890. Your number is encrypted and never shared.</small>
+                        <input type="tel" id="register-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
+                        <small>Use a UK mobile such as 07xxx xxxxxx or +447xxx xxxxxx. International +[country code][number] also works. Spaces are fine.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-phone-confirm">Confirm Mobile Number</label>
+                        <input type="tel" id="register-phone-confirm" name="confirm_phone" placeholder="Re-enter your mobile number" autocomplete="tel" inputmode="tel" required>
+                        <small id="register-confirm-help">We ask twice so a typo does not break future matching.</small>
                     </div>
                     <button type="submit" class="btn">Send Verification Code</button>
                 </form>
@@ -357,9 +453,9 @@ if ($path === '/register') {
 
             <article class="card">
                 <h2>🔐 Already Registered?</h2>
-                <p>If you already have an account, you can log in by requesting a new verification code.</p>
+                <p>If you already have an account, you can open your dashboard or request a new verification code to sign in again.</p>
                 <div style="margin-top: var(--space-lg);">
-                    <a href="/ping" class="btn btn-secondary">Go to Send Ping</a>
+                    <a href="/dashboard" class="btn btn-secondary">Go to Dashboard</a>
                 </div>
             </article>
         </section>
@@ -413,9 +509,29 @@ if ($path === '/register') {
             event.preventDefault();
 
             const phone = document.getElementById("register-phone").value.trim();
+            const confirmPhone = document.getElementById("register-phone-confirm").value.trim();
 
             if (phone === '') {
                 showResult(registerResult, "Please enter your mobile number.", "warn");
+                return;
+            }
+
+            if (confirmPhone === '') {
+                showResult(registerResult, "Please confirm your mobile number.", "warn");
+                return;
+            }
+
+            const normalizePhone = (value) => {
+                const trimmed = value.trim();
+                const digits = trimmed.replace(/\D/g, '');
+                if (trimmed.startsWith('+')) return '+' + digits;
+                if (digits.startsWith('00')) return '+' + digits.slice(2);
+                if (digits.startsWith('0')) return '+44' + digits.slice(1);
+                return '+' + digits;
+            };
+
+            if (normalizePhone(phone) !== normalizePhone(confirmPhone)) {
+                showResult(registerResult, "The mobile numbers do not match. Please check both entries before continuing.", "warn");
                 return;
             }
 
@@ -423,7 +539,8 @@ if ($path === '/register') {
 
             const response = await postJson("api/register", {
                 action: 'register',
-                phone: phone
+                phone: phone,
+                confirm_phone: confirmPhone
             });
 
             if (!response.ok) {
@@ -467,7 +584,7 @@ if ($path === '/register') {
 
             // Redirect to ping page after 2 seconds
             setTimeout(() => {
-                window.location.href = '/ping';
+                window.location.href = '/dashboard';
             }, 2000);
         });
     </script>
@@ -493,8 +610,8 @@ if ($path === '/ping') {
                 <form id="ping-form">
                     <div class="form-group">
                         <label for="ping-target">Mobile Number to Ping</label>
-                        <input type="tel" id="ping-target" name="target" placeholder="+1234567890 or 1234567890" required>
-                        <small>International format: +1234567890 or local format: 1234567890</small>
+                        <input type="tel" id="ping-target" name="target" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
+                        <small>Use 07xxx xxxxxx, +447xxx xxxxxx, or international +[country code][number]. We auto-normalise spacing and common UK formats.</small>
                     </div>
                     <button type="submit" class="btn">Send Peace Ping</button>
                 </form>
@@ -508,6 +625,16 @@ if ($path === '/ping') {
                         <p>Both you and the other person will receive SMS messages with questions to help you reconnect comfortably.</p>
                     </div>
                 </div>
+            </article>
+
+            <article class="card">
+                <h2>🔒 What We Store</h2>
+                <p>For matching, the number you enter is immediately normalized and fingerprinted with a private server secret.</p>
+                <ul class="trust-list">
+                    <li>Raw submitted target numbers are not stored.</li>
+                    <li>Matching compares fingerprints, not readable phone numbers.</li>
+                    <li>No one is notified unless both people independently ping each other.</li>
+                </ul>
             </article>
 
             <article class="card">
@@ -550,6 +677,105 @@ if ($path === '/ping') {
 <?php
     $content = ob_get_clean();
     renderPage('Send Ping', $content, 'ping');
+    exit;
+}
+
+// Dashboard page
+if ($path === '/dashboard') {
+    $currentUser = $userService->getCurrentUser();
+    if ($currentUser === null) {
+        header('Location: /register');
+        exit;
+    }
+
+    $summary = getDashboardSummary($db, (int) $currentUser['id']);
+    $counts = $summary['counts'];
+    $pings = $summary['pings'];
+    ob_start();
+?>
+    <div class="dashboard-page">
+        <div class="page-header">
+            <h1>Your Peace Ping Dashboard</h1>
+            <p>Signed in as <?php echo htmlspecialchars(maskMobileNumber((string) ($currentUser['contact'] ?? ''))); ?>. Track pings, preference links, and final updates from one place.</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number"><?php echo (int) $counts['pending']; ?></div>
+                <div class="stat-label">Pending</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number"><?php echo (int) $counts['matched']; ?></div>
+                <div class="stat-label">Matched</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number"><?php echo (int) $counts['completed']; ?></div>
+                <div class="stat-label">Completed</div>
+            </div>
+        </div>
+
+        <section class="grid dashboard-actions">
+            <article class="card">
+                <h2>Next Actions</h2>
+                <p>Send a new ping or respond to any open preference request below.</p>
+                <div class="inline-actions">
+                    <a href="/ping" class="btn">Send Peace Ping</a>
+                    <a href="/how-it-works" class="btn btn-secondary">How It Works</a>
+                </div>
+            </article>
+
+            <article class="card">
+                <h2>Privacy Reminder</h2>
+                <p>Target numbers are fingerprinted for matching and raw submitted numbers are not stored. The platform does not reveal interest unless both sides independently match.</p>
+            </article>
+        </section>
+
+        <section class="card dashboard-list">
+            <h2>Submitted Pings</h2>
+            <?php if (empty($pings)): ?>
+                <div class="empty-state">
+                    <div class="empty-state-icon">-</div>
+                    <p>No pings submitted yet.</p>
+                    <a href="/ping" class="btn">Send Your First Ping</a>
+                </div>
+            <?php else: ?>
+                <?php foreach ($pings as $ping): ?>
+                    <?php
+                    $status = (string) ($ping['ping_status'] ?? 'pending');
+                    $label = ucfirst($status);
+                    $created = date('d M Y, H:i', strtotime((string) $ping['created_at']));
+                    $token = (string) ($ping['token'] ?? '');
+                    ?>
+                    <div class="ping-card dashboard-ping">
+                        <div>
+                            <div class="match-date">Submitted <?php echo htmlspecialchars($created); ?></div>
+                            <strong>Peace Ping #<?php echo (int) $ping['id']; ?></strong>
+                            <p>
+                                <?php if ($status === 'pending'): ?>
+                                    Waiting for mutual interest. No notification has been sent to the other person.
+                                <?php elseif ($status === 'matched' && $token !== ''): ?>
+                                    Matched. Your private preference selection is ready.
+                                <?php elseif ($status === 'matched'): ?>
+                                    Matched. Waiting for preference updates or final message.
+                                <?php else: ?>
+                                    Completed. Check your latest SMS or final update.
+                                <?php endif; ?>
+                            </p>
+                        </div>
+                        <div class="ping-actions">
+                            <span class="ping-status <?php echo htmlspecialchars($status); ?>"><?php echo htmlspecialchars($label); ?></span>
+                            <?php if ($token !== ''): ?>
+                                <a href="/preferences?token=<?php echo urlencode($token); ?>" class="btn btn-secondary">Preferences</a>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </section>
+    </div>
+<?php
+    $content = ob_get_clean();
+    renderPage('Dashboard', $content, 'dashboard');
     exit;
 }
 

@@ -84,6 +84,16 @@ class UserService
         ];
     }
 
+    public function normalizePhone(string $phone): string
+    {
+        return $this->fingerprint->formatPhone($phone);
+    }
+
+    public function getPhoneFormatGuidance(): string
+    {
+        return $this->fingerprint->getFormatGuidance();
+    }
+
     public function verifyAndCreate(string $code, ?int $pendingUserId = null): array
     {
         if ($pendingUserId !== null) {
@@ -169,7 +179,8 @@ class UserService
 
         return [
             'id' => $_SESSION['user_id'],
-            'name' => $_SESSION['user_name'] ?? ''
+            'name' => $_SESSION['user_name'] ?? '',
+            'contact' => $this->getUserContact((int) $_SESSION['user_id']) ?? ''
         ];
     }
 

@@ -59,6 +59,7 @@ class UserController
     private function handleRegister(array $input): void
     {
         $phone = trim($input['phone'] ?? '');
+        $confirmPhone = trim($input['confirm_phone'] ?? '');
         $name = trim($input['name'] ?? 'Peace Ping User');
 
         if ($phone === '') {
@@ -66,8 +67,18 @@ class UserController
             return;
         }
 
-        if (strlen($phone) < 10 || strlen($phone) > 20) {
-            Response::json(['error' => 'Phone number must be between 10 and 20 characters.'], 400);
+        if ($confirmPhone === '') {
+            Response::json(['error' => 'Please confirm your mobile number.'], 400);
+            return;
+        }
+
+        if ($this->userService->normalizePhone($phone) !== $this->userService->normalizePhone($confirmPhone)) {
+            Response::json(['error' => 'The mobile numbers do not match. Please check both entries before continuing.'], 400);
+            return;
+        }
+
+        if (strlen(preg_replace('/\D/', '', $phone) ?? '') < 8 || strlen(preg_replace('/\D/', '', $phone) ?? '') > 15) {
+            Response::json(['error' => $this->userService->getPhoneFormatGuidance()], 400);
             return;
         }
 
