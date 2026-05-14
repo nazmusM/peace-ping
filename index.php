@@ -460,7 +460,6 @@ if ($path === '/register') {
                     <div class="form-group">
                         <label for="register-phone-confirm">Confirm Mobile Number</label>
                         <input type="tel" id="register-phone-confirm" name="confirm_phone" placeholder="Re-enter your mobile number" autocomplete="tel" inputmode="tel" required>
-                        <small id="register-confirm-help">We ask twice so a typo does not break future matching.</small>
                     </div>
                     <button type="submit" class="btn">Send Verification Code</button>
                 </form>
