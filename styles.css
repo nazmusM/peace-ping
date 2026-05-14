@@ -57,7 +57,10 @@
 }
 
 * {
+    margin: 0;
+    padding: 0;
     box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -239,12 +242,12 @@ main {
     flex: 1;
     padding: var(--space-xl) var(--space-lg);
     max-width: 1200px;
-    margin: 0 auto;
+    margin: 20px auto;
+    min-height: 100vh;
 }
 
 .container {
     max-width: 1200px;
-    margin: 0 auto;
     padding: 0 var(--space-md);
 }
 
@@ -328,6 +331,9 @@ p {
 
     main {
         padding: var(--space-md) var(--space-sm);
+    }
+    .nav-brand{
+        text-align: center;
     }
 }
 

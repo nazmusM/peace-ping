@@ -1,5 +1,5 @@
--- Full Peace Ping staging database schema
--- Aligned with the simplified staging model and current application code
+-- Peace Ping database schema
+-- Canonical schema for fresh installs and local resets.
 
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -48,11 +48,14 @@ CREATE TABLE pings (
     user_id BIGINT UNSIGNED NOT NULL,
     fingerprint_self CHAR(64) NOT NULL DEFAULT '',
     fingerprint_target CHAR(64) NOT NULL,
+    target_masked VARCHAR(40) NULL,
+    recipient_name VARCHAR(120) NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_pings_pair (fingerprint_self, fingerprint_target),
     INDEX idx_pings_user_id (user_id),
     INDEX idx_pings_fingerprint_self (fingerprint_self),
     INDEX idx_pings_fingerprint_target (fingerprint_target),
+    INDEX idx_pings_target_masked (target_masked),
     INDEX idx_pings_created_at (created_at),
     CONSTRAINT fk_pings_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -100,13 +103,18 @@ CREATE TABLE match_tokens (
 CREATE TABLE preferences (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     match_id BIGINT UNSIGNED NOT NULL,
-    user_id BIGINT UNSIGNED NOT NULL,
+    user_id BIGINT UNSIGNED NULL,
+    fingerprint CHAR(64) NULL,
     preference VARCHAR(50) NOT NULL,
     submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_preferences_user_match (match_id, user_id),
+    UNIQUE KEY uq_preferences_fingerprint_match (match_id, fingerprint),
     INDEX idx_preferences_match_id (match_id),
     INDEX idx_preferences_user_id (user_id),
+    INDEX idx_preferences_fingerprint (fingerprint),
     INDEX idx_preferences_submitted_at (submitted_at),
+    INDEX idx_preferences_created_at (created_at),
     CONSTRAINT fk_preferences_match FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
     CONSTRAINT fk_preferences_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -142,4 +150,4 @@ CREATE TABLE sms_inbox (
     CONSTRAINT fk_sms_inbox_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-SELECT 'Peace Ping staging schema created successfully.' AS message;
+SELECT 'Peace Ping schema created successfully.' AS message;

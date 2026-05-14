@@ -36,6 +36,9 @@ class UserController
                 case 'register':
                     $this->handleRegister($input);
                     break;
+                case 'login':
+                    $this->handleLogin($input);
+                    break;
                 case 'verify':
                     $this->handleVerify($input);
                     break;
@@ -83,6 +86,25 @@ class UserController
         }
 
         $result = $this->userService->register($name, $phone);
+
+        Response::json($result);
+    }
+
+    private function handleLogin(array $input): void
+    {
+        $phone = trim($input['phone'] ?? '');
+
+        if ($phone === '') {
+            Response::json(['error' => 'Mobile number is required.'], 400);
+            return;
+        }
+
+        if (strlen(preg_replace('/\D/', '', $phone) ?? '') < 8 || strlen(preg_replace('/\D/', '', $phone) ?? '') > 15) {
+            Response::json(['error' => $this->userService->getPhoneFormatGuidance()], 400);
+            return;
+        }
+
+        $result = $this->userService->requestLoginCode($phone);
 
         Response::json($result);
     }

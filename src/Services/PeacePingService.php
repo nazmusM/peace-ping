@@ -17,7 +17,7 @@ class PeacePingService
         private readonly string $portalUrl = ''
     ) {}
 
-    public function submitPing(int $userId, string $targetIdentifier): array
+    public function submitPing(int $userId, string $targetIdentifier, string $recipientName = ''): array
     {
 
         $userContact = $this->userService->getUserContact($userId);
@@ -36,12 +36,19 @@ class PeacePingService
             throw new InvalidArgumentException('You cannot ping yourself. Please enter a different phone number.');
         }
 
+        $this->ensurePingMetadataColumns();
+        $targetMasked = $this->maskPhone($normalizedTarget);
+        $recipientName = trim($recipientName);
+        if (strlen($recipientName) > 120) {
+            throw new InvalidArgumentException('Recipient name must be less than 120 characters.');
+        }
+
         $insert = $this->db->prepare(
-            'INSERT INTO pings (user_id, fingerprint_self, fingerprint_target, created_at)
-             VALUES (?, ?, ?, NOW())
-             ON DUPLICATE KEY UPDATE created_at = NOW()'
+            'INSERT INTO pings (user_id, fingerprint_self, fingerprint_target, target_masked, recipient_name, created_at)
+             VALUES (?, ?, ?, ?, NULLIF(?, \'\'), NOW())
+             ON DUPLICATE KEY UPDATE created_at = NOW(), target_masked = VALUES(target_masked), recipient_name = COALESCE(VALUES(recipient_name), recipient_name)'
         );
-        $insert->bind_param('iss', $userId, $userFingerprint, $fingerprintTarget);
+        $insert->bind_param('issss', $userId, $userFingerprint, $fingerprintTarget, $targetMasked, $recipientName);
         $insert->execute();
         $insert->close();
 
@@ -80,7 +87,7 @@ class PeacePingService
     public function getPreferenceContext(string $token): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT mt.user_id, mt.match_id, mt.is_used, mt.expires_at, m.user_a_id, m.user_b_id
+            'SELECT mt.user_id, mt.match_id, mt.is_used, mt.expires_at, m.user_a_id, m.user_b_id, m.status, m.completed_at
              FROM match_tokens mt
              JOIN matches m ON mt.match_id = m.id
              WHERE mt.token = ?
@@ -96,11 +103,17 @@ class PeacePingService
         }
 
         $isExpired = strtotime((string) $row['expires_at']) <= time();
+        $finalMessage = $this->getFinalMessageForMatch((int) $row['match_id']);
+        $hasPreference = $this->hasUserPreference((int) $row['match_id'], (int) $row['user_id']);
+
         return [
             'user_id' => (int) $row['user_id'],
             'match_id' => (int) $row['match_id'],
             'is_used' => (bool) $row['is_used'],
             'is_expired' => $isExpired,
+            'is_completed' => $row['completed_at'] !== null || (string) $row['status'] === 'completed',
+            'has_preference' => $hasPreference,
+            'final_message' => $finalMessage,
             'other_name' => 'the other person',
         ];
     }
@@ -156,12 +169,12 @@ class PeacePingService
         $contactB = $this->userService->getUserContact($userBId);
 
         if ($contactA !== null) {
-            $messageA = $this->buildPrivateUpdateMessage($this->buildPreferenceUrl($tokenA));
+            $messageA = $this->buildPreferencePromptMessage($this->buildPreferenceUrl($tokenA), $this->buildDashboardUrl());
             $this->notificationService->sendSmsMessage($contactA, $messageA);
         }
 
         if ($contactB !== null) {
-            $messageB = $this->buildPrivateUpdateMessage($this->buildPreferenceUrl($tokenB));
+            $messageB = $this->buildPreferencePromptMessage($this->buildPreferenceUrl($tokenB), $this->buildDashboardUrl());
             $this->notificationService->sendSmsMessage($contactB, $messageB);
         }
     }
@@ -211,15 +224,18 @@ class PeacePingService
         $preferenceCount = (int) $preferenceCheck->get_result()->fetch_assoc()['count'];
         $preferenceCheck->close();
 
+        $finalMessage = null;
         if ($preferenceCount === 2) {
             $matchId = (int) $tokenData['match_id'];
             $this->sendStage3Messages($matchId);
+            $finalMessage = $this->getFinalMessageForMatch($matchId);
 
             $this->completeMatch($matchId);
         }
 
         return [
             'success' => true,
+            'final_message' => $finalMessage,
             'message' => $preferenceCount === 2
                 ? 'Thank you. Both private preferences are in, and the final update has been sent.'
                 : 'Thank you. Your private preference has been recorded. We will send the final message once both people have responded.'
@@ -243,7 +259,11 @@ class PeacePingService
             return;
         }
 
-        $message = $this->buildPrivateUpdateMessage($this->getPortalUrl());
+        $message = $this->getFinalMessageForMatch($matchId);
+        if ($message === null) {
+            return;
+        }
+        $message .= "\n\nPeace Ping dashboard: " . $this->buildDashboardUrl();
 
         foreach ($preferences as $pref) {
             $userId = (int) $pref['user_id'];
@@ -271,9 +291,50 @@ class PeacePingService
         return "There is mutual openness to reconnecting.\nIf contact happens, it can be assumed to be welcome.";
     }
 
+    public function getFinalMessageForMatch(int $matchId): ?string
+    {
+        $preferencesQuery = $this->db->prepare(
+            'SELECT preference
+             FROM match_preferences
+             WHERE match_id = ?
+             ORDER BY id ASC'
+        );
+        $preferencesQuery->bind_param('i', $matchId);
+        $preferencesQuery->execute();
+        $preferences = $preferencesQuery->get_result()->fetch_all(MYSQLI_ASSOC);
+        $preferencesQuery->close();
+
+        if (count($preferences) !== 2) {
+            return null;
+        }
+
+        return $this->determineFinalMessage((string) $preferences[0]['preference'], (string) $preferences[1]['preference']);
+    }
+
+    private function hasUserPreference(int $matchId, int $userId): bool
+    {
+        $stmt = $this->db->prepare(
+            'SELECT id FROM match_preferences WHERE match_id = ? AND user_id = ? LIMIT 1'
+        );
+        $stmt->bind_param('ii', $matchId, $userId);
+        $stmt->execute();
+        $hasPreference = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+
+        return $hasPreference;
+    }
+
     private function buildPrivateUpdateMessage(string $url): string
     {
         return 'Peace Ping: You have a private update. Please log in to the web portal at ' . $url;
+    }
+
+    private function buildPreferencePromptMessage(string $preferenceUrl, string $dashboardUrl): string
+    {
+        return 'Peace Ping: You have a private preference request. Log in to your dashboard at '
+            . $dashboardUrl
+            . ' or use this secure link: '
+            . $preferenceUrl;
     }
 
     private function buildPreferenceUrl(string $token): string
@@ -291,6 +352,48 @@ class PeacePingService
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 
         return $scheme . '://' . $host;
+    }
+
+    private function buildDashboardUrl(): string
+    {
+        return rtrim($this->getPortalUrl(), '/') . '/dashboard';
+    }
+
+    private function maskPhone(string $phone): string
+    {
+        $digits = preg_replace('/\D/', '', $phone) ?? '';
+        if ($digits === '') {
+            return 'this recipient';
+        }
+
+        if (str_starts_with($phone, '+44') && strlen($digits) > 2) {
+            $digits = '0' . substr($digits, 2);
+        }
+
+        $startLength = str_starts_with($digits, '07') ? 2 : min(3, strlen($digits));
+        $start = substr($digits, 0, $startLength);
+        $end = substr($digits, -3);
+
+        return $start . '*** ***' . $end;
+    }
+
+    private function ensurePingMetadataColumns(): void
+    {
+        $this->ensureColumn('pings', 'target_masked', "ALTER TABLE pings ADD COLUMN target_masked VARCHAR(40) NULL AFTER fingerprint_target");
+        $this->ensureColumn('pings', 'recipient_name', "ALTER TABLE pings ADD COLUMN recipient_name VARCHAR(120) NULL AFTER target_masked");
+    }
+
+    private function ensureColumn(string $table, string $column, string $alterSql): void
+    {
+        $stmt = $this->db->prepare("SHOW COLUMNS FROM {$table} LIKE ?");
+        $stmt->bind_param('s', $column);
+        $stmt->execute();
+        $exists = $stmt->get_result()->num_rows > 0;
+        $stmt->close();
+
+        if (!$exists) {
+            $this->db->query($alterSql);
+        }
     }
 
     private function resetMatch(int $matchId): void

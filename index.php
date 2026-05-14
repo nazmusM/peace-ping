@@ -105,11 +105,16 @@ function renderPage(string $title, string $content, string $page = 'home'): void
     $activeNav = [
         'home' => 'Home',
         'how-it-works' => 'How It Works',
-        'register' => 'Register & Verify',
+        'register' => 'Register',
         'ping' => 'Send Ping',
         'dashboard' => 'Dashboard',
         'contact' => 'Contact'
     ];
+    if (!$isLoggedIn) {
+        $activeNav = array_slice($activeNav, 0, 3, true)
+            + ['login' => 'Login']
+            + array_slice($activeNav, 3, null, true);
+    }
 
 ?>
     <!DOCTYPE html>
@@ -123,7 +128,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
         <meta name="keywords" content="reconnect, communication, peace, anonymous, thoughtful">
         <meta name="author" content="Peace Ping">
         <title>Peace Ping<?php if ($page !== 'home') echo ' - ' . ucfirst($page); ?></title>
-        <link rel="stylesheet" href="/styles.css">
+        <link rel="stylesheet" href="/styles.css?v=<?= time(); ?>">
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -219,9 +224,11 @@ function renderSmsMessage(string $message): string
 
 function getDashboardSummary(mysqli $db, int $userId): array
 {
+    ensurePingDashboardColumns($db);
+
     $pings = [];
     $stmt = $db->prepare(
-        "SELECT p.id, p.created_at, p.fingerprint_self, p.fingerprint_target,
+        "SELECT p.id, p.created_at, p.fingerprint_self, p.fingerprint_target, p.target_masked, p.recipient_name,
                 m.id AS match_id, m.status AS match_status, m.stage, m.completed_at,
                 mt.token, mt.is_used, mt.expires_at,
                 CASE
@@ -261,6 +268,25 @@ function getDashboardSummary(mysqli $db, int $userId): array
         'pings' => $pings,
         'counts' => $counts,
     ];
+}
+
+function ensurePingDashboardColumns(mysqli $db): void
+{
+    ensureColumnExists($db, 'pings', 'target_masked', "ALTER TABLE pings ADD COLUMN target_masked VARCHAR(40) NULL AFTER fingerprint_target");
+    ensureColumnExists($db, 'pings', 'recipient_name', "ALTER TABLE pings ADD COLUMN recipient_name VARCHAR(120) NULL AFTER target_masked");
+}
+
+function ensureColumnExists(mysqli $db, string $table, string $column, string $alterSql): void
+{
+    $stmt = $db->prepare("SHOW COLUMNS FROM {$table} LIKE ?");
+    $stmt->bind_param('s', $column);
+    $stmt->execute();
+    $exists = $stmt->get_result()->num_rows > 0;
+    $stmt->close();
+
+    if (!$exists) {
+        $db->query($alterSql);
+    }
 }
 
 // API Routes
@@ -453,9 +479,9 @@ if ($path === '/register') {
 
             <article class="card">
                 <h2>🔐 Already Registered?</h2>
-                <p>If you already have an account, you can open your dashboard or request a new verification code to sign in again.</p>
+                <p>If you already have an account, log in with your mobile number and a fresh SMS code.</p>
                 <div style="margin-top: var(--space-lg);">
-                    <a href="/dashboard" class="btn btn-secondary">Go to Dashboard</a>
+                    <a href="/login" class="btn btn-secondary">Log In</a>
                 </div>
             </article>
         </section>
@@ -504,12 +530,45 @@ if ($path === '/register') {
         const verifyForm = document.getElementById("verify-form");
         const registerResult = document.getElementById("register-result");
         const verifyResult = document.getElementById("verify-result");
+        const registerPhone = document.getElementById("register-phone");
+        const registerPhoneConfirm = document.getElementById("register-phone-confirm");
+
+        const normalizePhone = (value) => {
+            const trimmed = value.trim();
+            const digits = trimmed.replace(/\D/g, '');
+            if (trimmed.startsWith('+')) return '+' + digits;
+            if (digits.startsWith('00')) return '+' + digits.slice(2);
+            if (digits.startsWith('0')) return '+44' + digits.slice(1);
+            return '+' + digits;
+        };
+
+        const syncRegisterMatchMessage = () => {
+            const isMismatchWarning = registerResult.classList.contains('warn') &&
+                registerResult.textContent.includes('mobile numbers do not match');
+
+            if (registerPhone.value.trim() && registerPhoneConfirm.value.trim() && normalizePhone(registerPhone.value) === normalizePhone(registerPhoneConfirm.value)) {
+                registerPhoneConfirm.setCustomValidity('');
+                if (isMismatchWarning) {
+                    showResult(registerResult, '', null);
+                }
+                return;
+            }
+
+            if (registerPhone.value.trim() && registerPhoneConfirm.value.trim()) {
+                registerPhoneConfirm.setCustomValidity('The mobile numbers do not match.');
+            } else {
+                registerPhoneConfirm.setCustomValidity('');
+            }
+        };
+
+        registerPhone.addEventListener('input', syncRegisterMatchMessage);
+        registerPhoneConfirm.addEventListener('input', syncRegisterMatchMessage);
 
         registerForm.addEventListener("submit", async (event) => {
             event.preventDefault();
 
-            const phone = document.getElementById("register-phone").value.trim();
-            const confirmPhone = document.getElementById("register-phone-confirm").value.trim();
+            const phone = registerPhone.value.trim();
+            const confirmPhone = registerPhoneConfirm.value.trim();
 
             if (phone === '') {
                 showResult(registerResult, "Please enter your mobile number.", "warn");
@@ -520,15 +579,6 @@ if ($path === '/register') {
                 showResult(registerResult, "Please confirm your mobile number.", "warn");
                 return;
             }
-
-            const normalizePhone = (value) => {
-                const trimmed = value.trim();
-                const digits = trimmed.replace(/\D/g, '');
-                if (trimmed.startsWith('+')) return '+' + digits;
-                if (digits.startsWith('00')) return '+' + digits.slice(2);
-                if (digits.startsWith('0')) return '+44' + digits.slice(1);
-                return '+' + digits;
-            };
 
             if (normalizePhone(phone) !== normalizePhone(confirmPhone)) {
                 showResult(registerResult, "The mobile numbers do not match. Please check both entries before continuing.", "warn");
@@ -594,8 +644,159 @@ if ($path === '/register') {
     exit;
 }
 
+// Login page
+if ($path === '/login') {
+    $currentUser = $userService->getCurrentUser();
+    if ($currentUser !== null) {
+        header('Location: /dashboard');
+        exit;
+    }
+
+    ob_start();
+?>
+    <div class="login-page">
+        <div class="page-header">
+            <h1>Log In to Peace Ping</h1>
+            <p>Use your registered mobile number and a one-time SMS code.</p>
+        </div>
+
+        <section class="grid">
+            <article class="card">
+                <h2>Request Login Code</h2>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="login-phone">Mobile Number</label>
+                        <input type="tel" id="login-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
+                        <small>Enter the mobile number you used when registering.</small>
+                    </div>
+                    <button type="submit" class="btn">Send Login Code</button>
+                </form>
+                <p id="login-result" class="result" aria-live="polite"></p>
+
+                <form id="login-verify-form" style="display: none;">
+                    <div class="form-group">
+                        <label for="login-verify-code">Verification Code</label>
+                        <input id="login-verify-code" name="code" type="text" required placeholder="123456" maxlength="6" inputmode="numeric">
+                    </div>
+                    <button type="submit" class="btn">Log In</button>
+                </form>
+                <p id="login-verify-result" class="result" aria-live="polite"></p>
+            </article>
+
+            <article class="card">
+                <h2>New Here?</h2>
+                <p>Create an account first, then you can return here whenever you need to sign back in.</p>
+                <div style="margin-top: var(--space-lg);">
+                    <a href="/register" class="btn btn-secondary">Register</a>
+                </div>
+            </article>
+        </section>
+    </div>
+
+    <script>
+        async function postJson(url, payload) {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const body = await response.json().catch(() => ({}));
+            return {
+                ok: response.ok,
+                status: response.status,
+                body
+            };
+        }
+
+        function showResult(target, text, tone) {
+            if (!text || text.trim() === '') {
+                target.style.display = 'none';
+                return;
+            }
+
+            target.style.display = 'block';
+            target.textContent = text;
+            target.classList.remove("ok", "warn");
+            if (tone) {
+                target.classList.add(tone);
+            }
+            target.scrollIntoView({
+                behavior: 'smooth',
+                block: 'nearest'
+            });
+        }
+
+        const loginForm = document.getElementById('login-form');
+        const loginVerifyForm = document.getElementById('login-verify-form');
+        const loginResult = document.getElementById('login-result');
+        const loginVerifyResult = document.getElementById('login-verify-result');
+
+        loginForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            const phone = document.getElementById('login-phone').value.trim();
+            if (!phone) {
+                showResult(loginResult, 'Please enter your mobile number.', 'warn');
+                return;
+            }
+
+            showResult(loginResult, 'Sending login code...', null);
+            const response = await postJson('/api/register', {
+                action: 'login',
+                phone
+            });
+
+            if (!response.ok) {
+                showResult(loginResult, response.body.error || 'Could not send login code.', 'warn');
+                return;
+            }
+
+            showResult(loginResult, response.body.message, 'ok');
+            loginForm.style.display = 'none';
+            loginVerifyForm.style.display = 'block';
+        });
+
+        loginVerifyForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            const code = document.getElementById('login-verify-code').value.trim();
+            if (!code) {
+                showResult(loginVerifyResult, 'Please enter the verification code.', 'warn');
+                return;
+            }
+
+            showResult(loginVerifyResult, 'Verifying...', null);
+            const response = await postJson('/api/register', {
+                action: 'verify',
+                code
+            });
+
+            if (!response.ok) {
+                showResult(loginVerifyResult, response.body.error || 'Login failed.', 'warn');
+                return;
+            }
+
+            showResult(loginVerifyResult, 'Logged in. Opening your dashboard...', 'ok');
+            window.location.href = '/dashboard';
+        });
+    </script>
+<?php
+    $content = ob_get_clean();
+    renderPage('Login', $content, 'login');
+    exit;
+}
+
 // Ping page
 if ($path === '/ping') {
+    $currentUser = $userService->getCurrentUser();
+    if ($currentUser === null) {
+        header('Location: /login');
+        exit;
+    }
+
     ob_start();
 ?>
     <div class="ping-page">
@@ -609,9 +810,17 @@ if ($path === '/ping') {
                 <h2>📤 Send Your Peace Ping</h2>
                 <form id="ping-form">
                     <div class="form-group">
+                        <label for="recipient-name">Recipient Name (Optional)</label>
+                        <input type="text" id="recipient-name" name="recipient_name" placeholder="Jane Doe" maxlength="120" autocomplete="off">
+                    </div>
+                    <div class="form-group">
                         <label for="ping-target">Mobile Number to Ping</label>
                         <input type="tel" id="ping-target" name="target" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
                         <small>Use 07xxx xxxxxx, +447xxx xxxxxx, or international +[country code][number]. We auto-normalise spacing and common UK formats.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="ping-target-confirm">Confirm Recipient Number</label>
+                        <input type="tel" id="ping-target-confirm" name="confirm_target" placeholder="Re-enter recipient number" autocomplete="tel" inputmode="tel" required>
                     </div>
                     <button type="submit" class="btn">Send Peace Ping</button>
                 </form>
@@ -684,7 +893,7 @@ if ($path === '/ping') {
 if ($path === '/dashboard') {
     $currentUser = $userService->getCurrentUser();
     if ($currentUser === null) {
-        header('Location: /register');
+        header('Location: /login');
         exit;
     }
 
@@ -745,11 +954,19 @@ if ($path === '/dashboard') {
                     $label = ucfirst($status);
                     $created = date('d M Y, H:i', strtotime((string) $ping['created_at']));
                     $token = (string) ($ping['token'] ?? '');
+                    $recipientName = trim((string) ($ping['recipient_name'] ?? ''));
+                    $targetMasked = trim((string) ($ping['target_masked'] ?? ''));
+                    $displayTarget = $recipientName !== ''
+                        ? $recipientName . ($targetMasked !== '' ? ' (' . $targetMasked . ')' : '')
+                        : ($targetMasked !== '' ? $targetMasked : '#' . (int) $ping['id']);
+                    $finalMessage = ($status === 'completed' && !empty($ping['match_id']))
+                        ? $peacePingService->getFinalMessageForMatch((int) $ping['match_id'])
+                        : null;
                     ?>
                     <div class="ping-card dashboard-ping">
                         <div>
                             <div class="match-date">Submitted <?php echo htmlspecialchars($created); ?></div>
-                            <strong>Peace Ping #<?php echo (int) $ping['id']; ?></strong>
+                            <strong>Peace Ping to <?php echo htmlspecialchars($displayTarget); ?></strong>
                             <p>
                                 <?php if ($status === 'pending'): ?>
                                     Waiting for mutual interest. No notification has been sent to the other person.
@@ -757,6 +974,8 @@ if ($path === '/dashboard') {
                                     Matched. Your private preference selection is ready.
                                 <?php elseif ($status === 'matched'): ?>
                                     Matched. Waiting for preference updates or final message.
+                                <?php elseif ($finalMessage !== null): ?>
+                                    <?php echo nl2br(htmlspecialchars($finalMessage)); ?>
                                 <?php else: ?>
                                     Completed. Check your latest SMS or final update.
                                 <?php endif; ?>
@@ -847,14 +1066,17 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
 
     $error = '';
     $success = '';
+    $finalUpdate = '';
     $context = $token !== '' ? $peacePingService->getPreferenceContext($token) : null;
 
     if ($token === '') {
         $error = 'Missing preference token.';
     } elseif ($context === null) {
         $error = 'Invalid or expired link.';
-    } elseif ($context['is_used']) {
-        $error = 'This preference link has already been used.';
+    } elseif ($context['is_completed'] && !empty($context['final_message'])) {
+        $finalUpdate = (string) $context['final_message'];
+    } elseif ($context['is_used'] || $context['has_preference']) {
+        $success = 'Your preference has already been recorded. The final update will appear here and on your dashboard once both people have responded.';
     } elseif ($context['is_expired']) {
         $error = 'This preference link has expired.';
     }
@@ -865,6 +1087,9 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
         try {
             $result = $peacePingService->submitPreference($token, $preference);
             $success = $result['message'];
+            if (!empty($result['final_message'])) {
+                $finalUpdate = (string) $result['final_message'];
+            }
         } catch (Exception $e) {
             $error = $e->getMessage();
         }
@@ -888,6 +1113,14 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
             </div>
         <?php endif; ?>
 
+        <?php if ($finalUpdate): ?>
+            <div class="success-message card">
+                <h3>Final Update</h3>
+                <p><?php echo nl2br(htmlspecialchars($finalUpdate)); ?></p>
+                <p><a href="/dashboard" class="btn btn-secondary">Open Dashboard</a></p>
+            </div>
+        <?php endif; ?>
+
         <?php if ($error): ?>
             <div class="error-message card">
                 <h3>Preference Unavailable</h3>
@@ -895,7 +1128,7 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
             </div>
         <?php endif; ?>
 
-        <?php if (!$success && !$error): ?>
+        <?php if (!$success && !$error && !$finalUpdate): ?>
             <div class="form-container">
                 <form method="POST" id="preference-form">
                     <div class="preference-card" data-preference="comfortable">

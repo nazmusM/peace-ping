@@ -26,7 +26,7 @@ class PingController
             $payload = $this->decodeJsonBody();
 
             // Only support new format with user_id
-            if (isset($payload['user_id'], $payload['target'])) {
+            if (isset($payload['user_id'], $payload['target'], $payload['confirm_target'])) {
                 // Validate user_id matches authenticated session
                 $currentUser = $this->userService->getCurrentUser();
                 if ($currentUser === null || (int) $payload['user_id'] !== $currentUser['id']) {
@@ -35,18 +35,25 @@ class PingController
                 }
 
                 $target = trim($payload['target']);
+                $confirmTarget = trim($payload['confirm_target']);
                 $digits = preg_replace('/\D/', '', $target) ?? '';
                 if (strlen($digits) < 8 || strlen($digits) > 15) {
                     Response::json(['error' => 'Please enter a mobile number as 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number].'], 400);
                     return;
                 }
 
+                if ($this->userService->normalizePhone($target) !== $this->userService->normalizePhone($confirmTarget)) {
+                    Response::json(['error' => 'The recipient numbers do not match. Please check both entries before sending.'], 400);
+                    return;
+                }
+
                 $result = $this->pingService->submitPing(
                     (int) $payload['user_id'],
-                    $target
+                    $target,
+                    trim($payload['recipient_name'] ?? '')
                 );
             } else {
-                Response::json(['error' => 'Missing required fields: user_id and target.'], 400);
+                Response::json(['error' => 'Missing required fields: user_id, target, and confirm_target.'], 400);
                 return;
             }
 

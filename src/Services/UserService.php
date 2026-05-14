@@ -33,9 +33,12 @@ class UserService
             throw new InvalidArgumentException('Invalid phone number format. Please use international format: +[country][number] or local format: [number]');
         }
 
-        $existingUser = $this->getUserByContactHash(
-            $this->fingerprint->fingerprint($normalizedPhone, $this->pepper)
-        );
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+        $existingUser = $this->getUserByContactHash($contactHash);
+
+        if ($existingUser !== null && (int) $existingUser['is_verified'] === 1) {
+            throw new InvalidArgumentException('This mobile number is already registered. Please log in instead.');
+        }
 
         // Generate verification code
         $verificationCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
@@ -43,8 +46,6 @@ class UserService
 
         // Encrypt contact info
         $encryptedContact = $this->encryption->encrypt($normalizedPhone);
-        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
-
         if ($existingUser !== null) {
             // Update existing unverified user
             $update = $this->db->prepare("
@@ -81,6 +82,42 @@ class UserService
         return [
             'user_id' => $userId,
             'message' => 'Verification code sent to your mobile number.'
+        ];
+    }
+
+    public function requestLoginCode(string $phone): array
+    {
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
+        if (!$this->fingerprint->validateIdentifier($normalizedPhone)) {
+            throw new InvalidArgumentException($this->getPhoneFormatGuidance());
+        }
+
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+        $existingUser = $this->getUserByContactHash($contactHash);
+        if ($existingUser === null || (int) $existingUser['is_verified'] !== 1) {
+            throw new InvalidArgumentException('No verified account was found for that mobile number. Please register first.');
+        }
+
+        $verificationCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $verificationExpiresAt = date('Y-m-d H:i:s', time() + 600);
+
+        $update = $this->db->prepare(
+            'UPDATE users SET verification_code = ?, verification_expires_at = ? WHERE id = ?'
+        );
+        $update->bind_param('ssi', $verificationCode, $verificationExpiresAt, $existingUser['id']);
+        $update->execute();
+        $update->close();
+
+        $this->notificationService->sendVerificationCode($normalizedPhone, $verificationCode);
+
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $_SESSION['pending_verification_user_id'] = (int) $existingUser['id'];
+
+        return [
+            'user_id' => (int) $existingUser['id'],
+            'message' => 'Login code sent to your mobile number.'
         ];
     }
 

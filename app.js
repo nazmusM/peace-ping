@@ -70,6 +70,16 @@ const contactDetails = document.getElementById("contact-details");
 
 // Add input validation for phone field
 const phoneInput = document.getElementById("ping-target");
+const confirmPhoneInput = document.getElementById("ping-target-confirm");
+const normalizePhone = (value) => {
+    const trimmed = value.trim();
+    const digits = trimmed.replace(/\D/g, '');
+    if (trimmed.startsWith('+')) return '+' + digits;
+    if (digits.startsWith('00')) return '+' + digits.slice(2);
+    if (digits.startsWith('0')) return '+44' + digits.slice(1);
+    return '+' + digits;
+};
+
 if (phoneInput) {
     phoneInput.addEventListener('input', debounce(function (e) {
         const value = e.target.value;
@@ -81,11 +91,27 @@ if (phoneInput) {
     }, 300));
 }
 
+if (phoneInput && confirmPhoneInput) {
+    const validateRecipientMatch = () => {
+        if (phoneInput.value.trim() && confirmPhoneInput.value.trim() && normalizePhone(phoneInput.value) !== normalizePhone(confirmPhoneInput.value)) {
+            confirmPhoneInput.setCustomValidity('The recipient numbers do not match.');
+        } else {
+            confirmPhoneInput.setCustomValidity('');
+        }
+    };
+
+    phoneInput.addEventListener('input', validateRecipientMatch);
+    confirmPhoneInput.addEventListener('input', validateRecipientMatch);
+}
+
+if (pingForm) {
 pingForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const resultEl = document.getElementById("ping-result");
     const target = document.getElementById("ping-target").value.trim();
+    const confirmTarget = document.getElementById("ping-target-confirm").value.trim();
+    const recipientName = document.getElementById("recipient-name").value.trim();
 
     // Client-side validation
     if (!target) {
@@ -95,6 +121,16 @@ pingForm.addEventListener("submit", async (event) => {
 
     if (!validatePhone(target)) {
         showResult(resultEl, "Please enter a valid mobile number. Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number]. Spaces are fine.", "warn");
+        return;
+    }
+
+    if (!confirmTarget) {
+        showResult(resultEl, "Please confirm the recipient number.", "warn");
+        return;
+    }
+
+    if (normalizePhone(target) !== normalizePhone(confirmTarget)) {
+        showResult(resultEl, "The recipient numbers do not match. Please check both entries before sending.", "warn");
         return;
     }
 
@@ -113,7 +149,12 @@ pingForm.addEventListener("submit", async (event) => {
         showResult(resultEl, "Sending Peace Ping...", null);
 
         // Submit ping with user_id
-        const response = await postJson("api/ping", { user_id: userId, target });
+        const response = await postJson("api/ping", {
+            user_id: userId,
+            target,
+            confirm_target: confirmTarget,
+            recipient_name: recipientName
+        });
 
         if (!response.ok) {
             const err = response.body.error || "Could not send ping.";
@@ -134,3 +175,4 @@ pingForm.addEventListener("submit", async (event) => {
         showResult(resultEl, "Error checking login status.", "warn");
     }
 });
+}
