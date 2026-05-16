@@ -17,6 +17,13 @@ class PeacePingService
         private readonly string $portalUrl = ''
     ) {}
 
+    private function writeDebugLog(string $msg): void
+    {
+        $path = __DIR__ . '/../../error_log.txt';
+        @file_put_contents($path, date('c') . ' ' . $msg . PHP_EOL, FILE_APPEND);
+        error_log($msg);
+    }
+
     public function submitPing(int $userId, string $targetIdentifier, string $recipientName = ''): array
     {
 
@@ -44,7 +51,7 @@ class PeacePingService
         }
 
         $targetMaskIsEmpty = $targetMasked === '';
-        error_log(sprintf(
+        $this->writeDebugLog(sprintf(
             'PeacePingService::submitPing - params userId=%d fingerprint_self_len=%d fingerprint_target_len=%d target_masked="%s" recipient_name="%s"',
             $userId,
             is_string($userFingerprint) ? strlen($userFingerprint) : 0,
@@ -76,7 +83,7 @@ class PeacePingService
         );
         $ok = $insert->execute();
         if ($ok === false) {
-            error_log('PeacePingService::submitPing - insert pings error: ' . $insert->error . ' DB error: ' . $this->db->error);
+            $this->writeDebugLog('PeacePingService::submitPing - insert pings error: ' . $insert->error . ' DB error: ' . $this->db->error);
             $insert->close();
             throw new \RuntimeException('Database error while saving ping.');
         }
@@ -90,7 +97,7 @@ class PeacePingService
         $reversePing->bind_param('ssi', $fingerprintTarget, $userFingerprint, $userId);
         $ok = $reversePing->execute();
         if ($ok === false) {
-            error_log('PeacePingService::submitPing - reverse select error: ' . $reversePing->error . ' DB error: ' . $this->db->error);
+            $this->writeDebugLog('PeacePingService::submitPing - reverse select error: ' . $reversePing->error . ' DB error: ' . $this->db->error);
             $reversePing->close();
             throw new \RuntimeException('Database error while checking for reverse ping.');
         }
