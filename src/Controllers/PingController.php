@@ -12,6 +12,8 @@ use Throwable;
 
 class PingController
 {
+    private string $rawBody = '';
+
     public function __construct(
         private readonly PeacePingService $pingService,
         private readonly RateLimiter $rateLimiter,
@@ -20,6 +22,8 @@ class PingController
 
     public function handle(string $ipAddress): void
     {
+        $this->rawBody = file_get_contents('php://input') ?: '';
+
         try {
             $this->rateLimiter->enforcePingLimit($ipAddress);
 
@@ -59,20 +63,31 @@ class PingController
 
             Response::json($result, 200);
         } catch (InvalidArgumentException $exception) {
+            $message = 'Ping invalid argument: ' . $exception->getMessage();
+            $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'error_log.txt';
+            file_put_contents($path, date('c') . ' ' . $message . PHP_EOL, FILE_APPEND | LOCK_EX);
+            error_log($message);
             Response::json(['error' => $exception->getMessage()], 422);
         } catch (RuntimeException $exception) {
+            $message = 'Ping runtime exception: ' . $exception->getMessage();
+            $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'error_log.txt';
+            file_put_contents($path, date('c') . ' ' . $message . PHP_EOL, FILE_APPEND | LOCK_EX);
+            error_log($message);
             Response::json(['error' => $exception->getMessage()], 429);
         } catch (Throwable $exception) {
-            error_log('Ping error: ' . $exception->getMessage());
+            $message = 'Ping error: ' . $exception->getMessage();
+            $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'error_log.txt';
+            file_put_contents($path, date('c') . ' ' . $message . ' trace=' . $exception->getTraceAsString() . PHP_EOL, FILE_APPEND | LOCK_EX);
+            error_log($message . ' trace=' . $exception->getTraceAsString());
             Response::json(['error' => 'Internal server error.'], 500);
         }
     }
 
     private function decodeJsonBody(): array
     {
-        $raw = file_get_contents('php://input');
+        $raw = $this->rawBody;
 
-        if ($raw === false || trim($raw) === '') {
+        if (trim($raw) === '') {
             return [];
         }
 

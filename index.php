@@ -48,8 +48,39 @@ $rateLimiter = new RateLimiter(
 
 // Error reporting configuration
 ini_set('display_errors', 0);  // Don't display errors to users
+ini_set('display_startup_errors', 0);
 ini_set('log_errors', 1);      // Log errors to file
+ini_set('error_log', __DIR__ . '/error_log.txt'); // Write PHP error_log output to local file
 error_reporting(E_ALL);        // Report all errors
+
+// Global exception handler for debugging uncaught exceptions
+set_exception_handler(function (Throwable $exception) {
+    $message = sprintf(
+        '[%s] Uncaught exception: %s in %s on line %d trace=%s\n',
+        date('c'),
+        $exception->getMessage(),
+        $exception->getFile(),
+        $exception->getLine(),
+        $exception->getTraceAsString()
+    );
+    file_put_contents(__DIR__ . '/error_log.txt', $message, FILE_APPEND | LOCK_EX);
+    error_log($message);
+});
+
+register_shutdown_function(function () {
+    $error = error_get_last();
+    if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+        $message = sprintf(
+            '[%s] Shutdown error: %s in %s on line %d\n',
+            date('c'),
+            $error['message'],
+            $error['file'],
+            $error['line']
+        );
+        file_put_contents(__DIR__ . '/error_log.txt', $message, FILE_APPEND | LOCK_EX);
+        error_log($message);
+    }
+});
 
 // Custom error handler for production
 set_error_handler(function ($severity, $message, $file, $line) {
@@ -322,10 +353,14 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
     }
 
     if ($path === '/api/ping') {
+        $logEntry = sprintf("[%s] API PING %s %s\n", date('c'), $_SERVER['REQUEST_METHOD'], $path);
+        file_put_contents(__DIR__ . '/error_log.txt', $logEntry, FILE_APPEND | LOCK_EX);
+
         try {
             $pingController = new PingController($peacePingService, $rateLimiter, $userService);
             $pingController->handle($_SERVER['REMOTE_ADDR']);
         } catch (Exception $e) {
+            file_put_contents(__DIR__ . '/error_log.txt', '[' . date('c') . '] Ping controller catch: ' . $e->getMessage() . '\n', FILE_APPEND | LOCK_EX);
             error_log('Ping controller error: ' . $e->getMessage());
             Response::json(['error' => 'Internal server error.'], 500);
         }

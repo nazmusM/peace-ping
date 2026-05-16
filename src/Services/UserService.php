@@ -285,11 +285,29 @@ class UserService
      */
     public function getUserById(int $userId): ?array
     {
-        $select = $this->db->prepare(
-            'SELECT id, name, contact_encrypted, contact_hash, created_at FROM users WHERE id = ? LIMIT 1'
-        );
+        $query = 'SELECT id, name, contact_encrypted, contact_hash, created_at FROM users WHERE id = ? LIMIT 1';
+        $select = $this->db->prepare($query);
+        if ($select === false) {
+            error_log('UserService::getUserById prepare failed: ' . $this->db->error . '. Falling back to direct query.');
+            $escapedId = (int) $userId;
+            $result = $this->db->query(
+                "SELECT id, name, contact_encrypted, contact_hash, created_at FROM users WHERE id = {$escapedId} LIMIT 1"
+            );
+            if ($result === false) {
+                error_log('UserService::getUserById direct query failed: ' . $this->db->error);
+                throw new \RuntimeException('Database error fetching user by ID.');
+            }
+            $user = $result->fetch_assoc();
+            $result->close();
+            return $user ?: null;
+        }
+
         $select->bind_param('i', $userId);
-        $select->execute();
+        if (!$select->execute()) {
+            error_log('UserService::getUserById execute failed: ' . $select->error . ' DB error: ' . $this->db->error);
+            $select->close();
+            throw new \RuntimeException('Database error fetching user by ID.');
+        }
         $user = $select->get_result()->fetch_assoc();
         $select->close();
 
