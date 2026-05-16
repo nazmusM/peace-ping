@@ -44,6 +44,14 @@ class PeacePingService
         }
 
         $targetMaskIsEmpty = $targetMasked === '';
+        error_log(sprintf(
+            'PeacePingService::submitPing - params userId=%d fingerprint_self_len=%d fingerprint_target_len=%d target_masked="%s" recipient_name="%s"',
+            $userId,
+            is_string($userFingerprint) ? strlen($userFingerprint) : 0,
+            is_string($fingerprintTarget) ? strlen($fingerprintTarget) : 0,
+            $targetMasked,
+            $recipientName
+        ));
         $recipientNameIsEmpty = $recipientName === '';
 
         $insert = $this->db->prepare(
@@ -66,7 +74,12 @@ class PeacePingService
             $recipientNameIsEmpty,
             $recipientName
         );
-        $insert->execute();
+        $ok = $insert->execute();
+        if ($ok === false) {
+            error_log('PeacePingService::submitPing - insert pings error: ' . $insert->error . ' DB error: ' . $this->db->error);
+            $insert->close();
+            throw new \RuntimeException('Database error while saving ping.');
+        }
         $insert->close();
 
         $reversePing = $this->db->prepare(
@@ -75,7 +88,12 @@ class PeacePingService
              ORDER BY created_at DESC LIMIT 1'
         );
         $reversePing->bind_param('ssi', $fingerprintTarget, $userFingerprint, $userId);
-        $reversePing->execute();
+        $ok = $reversePing->execute();
+        if ($ok === false) {
+            error_log('PeacePingService::submitPing - reverse select error: ' . $reversePing->error . ' DB error: ' . $this->db->error);
+            $reversePing->close();
+            throw new \RuntimeException('Database error while checking for reverse ping.');
+        }
         $reverseResult = $reversePing->get_result();
 
         if ($reverseResult->num_rows > 0) {
