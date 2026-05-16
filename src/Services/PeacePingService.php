@@ -43,12 +43,29 @@ class PeacePingService
             throw new InvalidArgumentException('Recipient name must be less than 120 characters.');
         }
 
+        $targetMaskIsEmpty = $targetMasked === '';
+        $recipientNameIsEmpty = $recipientName === '';
+
         $insert = $this->db->prepare(
             'INSERT INTO pings (user_id, fingerprint_self, fingerprint_target, target_masked, recipient_name, created_at)
-             VALUES (?, ?, ?, ?, NULLIF(?, \'\'), NOW())
-             ON DUPLICATE KEY UPDATE created_at = NOW(), target_masked = VALUES(target_masked), recipient_name = COALESCE(VALUES(recipient_name), recipient_name)'
+             VALUES (?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+                 created_at = NOW(),
+                 target_masked = IF(?, target_masked, ?),
+                 recipient_name = IF(?, recipient_name, ?)'
         );
-        $insert->bind_param('issss', $userId, $userFingerprint, $fingerprintTarget, $targetMasked, $recipientName);
+        $insert->bind_param(
+            'issssisss',
+            $userId,
+            $userFingerprint,
+            $fingerprintTarget,
+            $targetMasked,
+            $recipientName,
+            $targetMaskIsEmpty,
+            $targetMasked,
+            $recipientNameIsEmpty,
+            $recipientName
+        );
         $insert->execute();
         $insert->close();
 
@@ -159,9 +176,12 @@ class PeacePingService
 
         $stmt = $this->db->prepare(
             'INSERT INTO match_tokens (match_id, user_id, token, created_at, expires_at)
-             VALUES (?, ?, ?, NOW(), ?), (?, ?, ?, NOW(), ?)'
+             VALUES (?, ?, ?, NOW(), ?)'
         );
-        $stmt->bind_param('iissiiss', $matchId, $userAId, $tokenA, $expiresAt, $matchId, $userBId, $tokenB, $expiresAt);
+        $stmt->bind_param('iiss', $matchId, $userAId, $tokenA, $expiresAt);
+        $stmt->execute();
+
+        $stmt->bind_param('iiss', $matchId, $userBId, $tokenB, $expiresAt);
         $stmt->execute();
         $stmt->close();
 

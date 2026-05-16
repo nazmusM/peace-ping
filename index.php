@@ -105,15 +105,20 @@ function renderPage(string $title, string $content, string $page = 'home'): void
     $activeNav = [
         'home' => 'Home',
         'how-it-works' => 'How It Works',
-        'register' => 'Register',
         'ping' => 'Send Ping',
         'dashboard' => 'Dashboard',
         'contact' => 'Contact'
     ];
     if (!$isLoggedIn) {
-        $activeNav = array_slice($activeNav, 0, 3, true)
-            + ['login' => 'Login']
-            + array_slice($activeNav, 3, null, true);
+        $activeNav = [
+            'home' => 'Home',
+            'how-it-works' => 'How It Works',
+            'register' => 'Register',
+            'login' => 'Login',
+            'ping' => 'Send Ping',
+            'dashboard' => 'Dashboard',
+            'contact' => 'Contact'
+        ];
     }
 
 ?>
@@ -278,10 +283,16 @@ function ensurePingDashboardColumns(mysqli $db): void
 
 function ensureColumnExists(mysqli $db, string $table, string $column, string $alterSql): void
 {
-    $stmt = $db->prepare("SHOW COLUMNS FROM {$table} LIKE ?");
-    $stmt->bind_param('s', $column);
+    $database = $db->query('SELECT DATABASE() AS db_name')->fetch_assoc()['db_name'] ?? '';
+    $stmt = $db->prepare(
+        'SELECT COUNT(*) AS column_count
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+    );
+    $stmt->bind_param('sss', $database, $table, $column);
     $stmt->execute();
-    $exists = $stmt->get_result()->num_rows > 0;
+    $row = $stmt->get_result()->fetch_assoc();
+    $exists = ((int) ($row['column_count'] ?? 0)) > 0;
     $stmt->close();
 
     if (!$exists) {
@@ -440,6 +451,12 @@ if ($path === '/how-it-works') {
 
 // Register page
 if ($path === '/register') {
+    $currentUser = $userService->getCurrentUser();
+    if ($currentUser !== null) {
+        header('Location: /dashboard');
+        exit;
+    }
+
     ob_start();
 ?>
     <div class="register-page">
@@ -460,16 +477,33 @@ if ($path === '/register') {
                     <div class="form-group">
                         <label for="register-phone-confirm">Confirm Mobile Number</label>
                         <input type="tel" id="register-phone-confirm" name="confirm_phone" placeholder="Re-enter your mobile number" autocomplete="tel" inputmode="tel" required>
+                        <p class="field-error" id="register-phone-confirm-error" aria-live="polite"></p>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">Password</label>
+                        <input type="password" id="register-password" name="password" placeholder="Create a password" autocomplete="new-password" required minlength="8">
+                        <small>Password must be at least 8 characters long and include at least one uppercase letter and one number.</small>
+                    </div>
+                    <div class="password-strength">
+                        <div class="strength-label">Password strength</div>
+                        <div class="strength-bar">
+                            <span id="password-strength-fill"></span>
+                        </div>
+                        <div id="password-strength-text" class="strength-text">Minimum 8 characters, one capital letter, and one number.</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password-confirm">Confirm Password</label>
+                        <input type="password" id="register-password-confirm" name="confirm_password" placeholder="Re-enter your password" autocomplete="new-password" required minlength="8">
+                        <p class="field-error" id="register-password-confirm-error" aria-live="polite"></p>
                     </div>
                     <button type="submit" class="btn">Send Verification Code</button>
                 </form>
                 <p id="register-result" class="result" aria-live="polite"></p>
 
-                <!-- Verification form (hidden initially) -->
                 <form id="verify-form" style="display: none;">
                     <div class="form-group">
                         <label for="verify-code">Verification Code</label>
-                        <input id="verify-code" name="code" type="text" required placeholder="123456" maxlength="6">
+                        <input id="verify-code" name="code" type="text" required placeholder="123456" maxlength="6" inputmode="numeric">
                     </div>
                     <button type="submit" class="btn">Verify & Create Account</button>
                 </form>
@@ -478,7 +512,7 @@ if ($path === '/register') {
 
             <article class="card">
                 <h2>🔐 Already Registered?</h2>
-                <p>If you already have an account, log in with your mobile number and a fresh SMS code.</p>
+                <p>If you already have an account, log in with your mobile number and password.</p>
                 <div style="margin-top: var(--space-lg);">
                     <a href="/login" class="btn btn-secondary">Log In</a>
                 </div>
@@ -531,6 +565,13 @@ if ($path === '/register') {
         const verifyResult = document.getElementById("verify-result");
         const registerPhone = document.getElementById("register-phone");
         const registerPhoneConfirm = document.getElementById("register-phone-confirm");
+        const registerPassword = document.getElementById("register-password");
+        const registerPasswordConfirm = document.getElementById("register-password-confirm");
+        const registerPhoneConfirmError = document.getElementById("register-phone-confirm-error");
+        const registerPasswordConfirmError = document.getElementById("register-password-confirm-error");
+        const passwordStrengthFill = document.getElementById("password-strength-fill");
+        const passwordStrengthText = document.getElementById("password-strength-text");
+        const submitButton = registerForm.querySelector('button[type="submit"]');
 
         const normalizePhone = (value) => {
             const trimmed = value.trim();
@@ -541,33 +582,110 @@ if ($path === '/register') {
             return '+' + digits;
         };
 
-        const syncRegisterMatchMessage = () => {
-            const isMismatchWarning = registerResult.classList.contains('warn') &&
-                registerResult.textContent.includes('mobile numbers do not match');
+        const getPasswordStrengthScore = (password) => {
+            let score = 0;
+            if (password.length >= 8) score += 1;
+            if (/[A-Z]/.test(password)) score += 1;
+            if (/[0-9]/.test(password)) score += 1;
+            if (/[^A-Za-z0-9]/.test(password)) score += 1;
+            return score;
+        };
 
-            if (registerPhone.value.trim() && registerPhoneConfirm.value.trim() && normalizePhone(registerPhone.value) === normalizePhone(registerPhoneConfirm.value)) {
-                registerPhoneConfirm.setCustomValidity('');
-                if (isMismatchWarning) {
-                    showResult(registerResult, '', null);
-                }
-                return;
+        const getStrengthLabel = (score) => {
+            if (score <= 1) return 'Weak';
+            if (score === 2) return 'Fair';
+            if (score === 3) return 'Good';
+            return 'Strong';
+        };
+
+        const updatePasswordStrength = () => {
+            const password = registerPassword.value;
+            const score = getPasswordStrengthScore(password);
+            const label = getStrengthLabel(score);
+            const width = (score / 4) * 100;
+
+            if (passwordStrengthFill) {
+                passwordStrengthFill.style.width = width + '%';
+                passwordStrengthFill.className = '';
+                passwordStrengthFill.classList.add(label.toLowerCase());
             }
-
-            if (registerPhone.value.trim() && registerPhoneConfirm.value.trim()) {
-                registerPhoneConfirm.setCustomValidity('The mobile numbers do not match.');
-            } else {
-                registerPhoneConfirm.setCustomValidity('');
+            if (passwordStrengthText) {
+                passwordStrengthText.textContent = `${label} password.`;
             }
         };
 
-        registerPhone.addEventListener('input', syncRegisterMatchMessage);
-        registerPhoneConfirm.addEventListener('input', syncRegisterMatchMessage);
+        const getRegisterValidationMessage = () => {
+            const phone = registerPhone.value.trim();
+            const confirmPhone = registerPhoneConfirm.value.trim();
+            const password = registerPassword.value;
+            const confirmPassword = registerPasswordConfirm.value;
+
+            if (password) {
+                if (password.length < 8) {
+                    return 'Password must be at least 8 characters long.';
+                }
+                if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+                    return 'Password must contain at least one uppercase letter and one number.';
+                }
+            }
+
+            return '';
+        };
+
+        const updateRegisterValidation = () => {
+            const phone = registerPhone.value.trim();
+            const confirmPhone = registerPhoneConfirm.value.trim();
+            const password = registerPassword.value;
+            const confirmPassword = registerPasswordConfirm.value;
+
+            let phoneError = '';
+            let passwordError = '';
+
+            if (phone && confirmPhone && normalizePhone(phone) !== normalizePhone(confirmPhone)) {
+                phoneError = 'The mobile numbers do not match.';
+            }
+
+            if (password && confirmPassword && password !== confirmPassword) {
+                passwordError = 'The passwords do not match.';
+            }
+
+            registerPhoneConfirmError.textContent = phoneError;
+            registerPasswordConfirmError.textContent = passwordError;
+
+            const message = getRegisterValidationMessage();
+            if (message) {
+                showResult(registerResult, message, 'warn');
+                submitButton.disabled = true;
+            } else if (phoneError || passwordError) {
+                showResult(registerResult, '', null);
+                submitButton.disabled = true;
+            } else {
+                showResult(registerResult, '', null);
+                submitButton.disabled = false;
+            }
+        };
+
+        registerPhone.addEventListener('input', updateRegisterValidation);
+        registerPhoneConfirm.addEventListener('input', updateRegisterValidation);
+        registerPassword.addEventListener('input', () => {
+            updatePasswordStrength();
+            updateRegisterValidation();
+        });
+        registerPasswordConfirm.addEventListener('input', updateRegisterValidation);
 
         registerForm.addEventListener("submit", async (event) => {
             event.preventDefault();
 
             const phone = registerPhone.value.trim();
             const confirmPhone = registerPhoneConfirm.value.trim();
+            const password = registerPassword.value;
+            const confirmPassword = registerPasswordConfirm.value;
+            const validationMessage = getRegisterValidationMessage();
+
+            if (validationMessage) {
+                showResult(registerResult, validationMessage, 'warn');
+                return;
+            }
 
             if (phone === '') {
                 showResult(registerResult, "Please enter your mobile number.", "warn");
@@ -579,8 +697,13 @@ if ($path === '/register') {
                 return;
             }
 
-            if (normalizePhone(phone) !== normalizePhone(confirmPhone)) {
-                showResult(registerResult, "The mobile numbers do not match. Please check both entries before continuing.", "warn");
+            if (password === '') {
+                showResult(registerResult, "Please enter a password.", "warn");
+                return;
+            }
+
+            if (confirmPassword === '') {
+                showResult(registerResult, "Please confirm your password.", "warn");
                 return;
             }
 
@@ -589,7 +712,9 @@ if ($path === '/register') {
             const response = await postJson("api/register", {
                 action: 'register',
                 phone: phone,
-                confirm_phone: confirmPhone
+                confirm_phone: confirmPhone,
+                password: password,
+                confirm_password: confirmPassword
             });
 
             if (!response.ok) {
@@ -599,13 +724,10 @@ if ($path === '/register') {
             }
 
             showResult(registerResult, response.body.message, "ok");
-
-            // Show verification form
             registerForm.style.display = "none";
             verifyForm.style.display = "block";
         });
 
-        // Verification form handler
         verifyForm.addEventListener("submit", async (event) => {
             event.preventDefault();
 
@@ -629,12 +751,10 @@ if ($path === '/register') {
                 return;
             }
 
-            showResult(verifyResult, "Account created successfully! Redirecting...", "ok");
-
-            // Redirect to ping page after 2 seconds
+            showResult(verifyResult, "Account verified. Opening your dashboard...", "ok");
             setTimeout(() => {
                 window.location.href = '/dashboard';
-            }, 2000);
+            }, 800);
         });
     </script>
 <?php
@@ -656,30 +776,25 @@ if ($path === '/login') {
     <div class="login-page">
         <div class="page-header">
             <h1>Log In to Peace Ping</h1>
-            <p>Use your registered mobile number and a one-time SMS code.</p>
+            <p>Use your registered mobile number and password.</p>
         </div>
 
         <section class="grid">
             <article class="card">
-                <h2>Request Login Code</h2>
+                <h2>Log In</h2>
                 <form id="login-form">
                     <div class="form-group">
                         <label for="login-phone">Mobile Number</label>
                         <input type="tel" id="login-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
                         <small>Enter the mobile number you used when registering.</small>
                     </div>
-                    <button type="submit" class="btn">Send Login Code</button>
-                </form>
-                <p id="login-result" class="result" aria-live="polite"></p>
-
-                <form id="login-verify-form" style="display: none;">
                     <div class="form-group">
-                        <label for="login-verify-code">Verification Code</label>
-                        <input id="login-verify-code" name="code" type="text" required placeholder="123456" maxlength="6" inputmode="numeric">
+                        <label for="login-password">Password</label>
+                        <input type="password" id="login-password" name="password" placeholder="Enter your password" autocomplete="current-password" required>
                     </div>
                     <button type="submit" class="btn">Log In</button>
                 </form>
-                <p id="login-verify-result" class="result" aria-live="polite"></p>
+                <p id="login-result" class="result" aria-live="polite"></p>
             </article>
 
             <article class="card">
@@ -729,56 +844,37 @@ if ($path === '/login') {
         }
 
         const loginForm = document.getElementById('login-form');
-        const loginVerifyForm = document.getElementById('login-verify-form');
         const loginResult = document.getElementById('login-result');
-        const loginVerifyResult = document.getElementById('login-verify-result');
 
         loginForm.addEventListener('submit', async (event) => {
             event.preventDefault();
 
             const phone = document.getElementById('login-phone').value.trim();
+            const password = document.getElementById('login-password').value;
+
             if (!phone) {
                 showResult(loginResult, 'Please enter your mobile number.', 'warn');
                 return;
             }
 
-            showResult(loginResult, 'Sending login code...', null);
+            if (!password) {
+                showResult(loginResult, 'Please enter your password.', 'warn');
+                return;
+            }
+
+            showResult(loginResult, 'Logging in...', null);
             const response = await postJson('/api/register', {
                 action: 'login',
-                phone
+                phone,
+                password
             });
 
             if (!response.ok) {
-                showResult(loginResult, response.body.error || 'Could not send login code.', 'warn');
+                showResult(loginResult, response.body.error || 'Login failed.', 'warn');
                 return;
             }
 
             showResult(loginResult, response.body.message, 'ok');
-            loginForm.style.display = 'none';
-            loginVerifyForm.style.display = 'block';
-        });
-
-        loginVerifyForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
-
-            const code = document.getElementById('login-verify-code').value.trim();
-            if (!code) {
-                showResult(loginVerifyResult, 'Please enter the verification code.', 'warn');
-                return;
-            }
-
-            showResult(loginVerifyResult, 'Verifying...', null);
-            const response = await postJson('/api/register', {
-                action: 'verify',
-                code
-            });
-
-            if (!response.ok) {
-                showResult(loginVerifyResult, response.body.error || 'Login failed.', 'warn');
-                return;
-            }
-
-            showResult(loginVerifyResult, 'Logged in. Opening your dashboard...', 'ok');
             window.location.href = '/dashboard';
         });
     </script>
@@ -820,6 +916,7 @@ if ($path === '/ping') {
                     <div class="form-group">
                         <label for="ping-target-confirm">Confirm Recipient Number</label>
                         <input type="tel" id="ping-target-confirm" name="confirm_target" placeholder="Re-enter recipient number" autocomplete="tel" inputmode="tel" required>
+                        <p class="field-error" id="ping-target-confirm-error" aria-live="polite"></p>
                     </div>
                     <button type="submit" class="btn">Send Peace Ping</button>
                 </form>

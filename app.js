@@ -71,6 +71,9 @@ const contactDetails = document.getElementById("contact-details");
 // Add input validation for phone field
 const phoneInput = document.getElementById("ping-target");
 const confirmPhoneInput = document.getElementById("ping-target-confirm");
+const pingResult = document.getElementById("ping-result");
+const pingTargetConfirmError = document.getElementById("ping-target-confirm-error");
+const pingSubmitButton = pingForm?.querySelector('button[type="submit"]');
 const normalizePhone = (value) => {
     const trimmed = value.trim();
     const digits = trimmed.replace(/\D/g, '');
@@ -78,6 +81,41 @@ const normalizePhone = (value) => {
     if (digits.startsWith('00')) return '+' + digits.slice(2);
     if (digits.startsWith('0')) return '+44' + digits.slice(1);
     return '+' + digits;
+};
+
+const updatePingValidation = () => {
+    if (!pingSubmitButton) {
+        return;
+    }
+
+    let message = '';
+    const targetValue = phoneInput?.value.trim() ?? '';
+    const confirmTargetValue = confirmPhoneInput?.value.trim() ?? '';
+
+    if (targetValue && !validatePhone(targetValue)) {
+        message = 'Please enter a valid mobile number. Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number].';
+    } else if (targetValue && confirmTargetValue && normalizePhone(targetValue) !== normalizePhone(confirmTargetValue)) {
+        message = 'The recipient numbers do not match. Please check both entries before sending.';
+    }
+
+    if (pingTargetConfirmError) {
+        if (targetValue && confirmTargetValue && normalizePhone(targetValue) !== normalizePhone(confirmTargetValue)) {
+            pingTargetConfirmError.textContent = 'The recipient numbers do not match. Please check both entries before sending.';
+        } else {
+            pingTargetConfirmError.textContent = '';
+        }
+    }
+
+    if (message) {
+        showResult(pingResult, message, 'warn');
+        pingSubmitButton.disabled = true;
+    } else if (pingTargetConfirmError?.textContent) {
+        showResult(pingResult, '', null);
+        pingSubmitButton.disabled = true;
+    } else {
+        showResult(pingResult, '', null);
+        pingSubmitButton.disabled = false;
+    }
 };
 
 if (phoneInput) {
@@ -88,6 +126,7 @@ if (phoneInput) {
         } else {
             e.target.setCustomValidity('');
         }
+        updatePingValidation();
     }, 300));
 }
 
@@ -98,6 +137,7 @@ if (phoneInput && confirmPhoneInput) {
         } else {
             confirmPhoneInput.setCustomValidity('');
         }
+        updatePingValidation();
     };
 
     phoneInput.addEventListener('input', validateRecipientMatch);
@@ -105,74 +145,74 @@ if (phoneInput && confirmPhoneInput) {
 }
 
 if (pingForm) {
-pingForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
+    pingForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
 
-    const resultEl = document.getElementById("ping-result");
-    const target = document.getElementById("ping-target").value.trim();
-    const confirmTarget = document.getElementById("ping-target-confirm").value.trim();
-    const recipientName = document.getElementById("recipient-name").value.trim();
+        const resultEl = document.getElementById("ping-result");
+        const target = document.getElementById("ping-target").value.trim();
+        const confirmTarget = document.getElementById("ping-target-confirm").value.trim();
+        const recipientName = document.getElementById("recipient-name").value.trim();
 
-    // Client-side validation
-    if (!target) {
-        showResult(resultEl, "Please enter a phone number.", "warn");
-        return;
-    }
-
-    if (!validatePhone(target)) {
-        showResult(resultEl, "Please enter a valid mobile number. Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number]. Spaces are fine.", "warn");
-        return;
-    }
-
-    if (!confirmTarget) {
-        showResult(resultEl, "Please confirm the recipient number.", "warn");
-        return;
-    }
-
-    if (normalizePhone(target) !== normalizePhone(confirmTarget)) {
-        showResult(resultEl, "The recipient numbers do not match. Please check both entries before sending.", "warn");
-        return;
-    }
-
-    // Hide previous match info
-    matchInfo.hidden = true;
-
-    // Check if user is logged in
-    try {
-        const statusResponse = await postJson("api/register", { action: 'status' });
-        if (!statusResponse.body.logged_in) {
-            showResult(resultEl, "Please register and log in first.", "warn");
+        // Client-side validation
+        if (!target) {
+            showResult(resultEl, "Please enter a phone number.", "warn");
             return;
         }
 
-        const userId = statusResponse.body.user.id;
-        showResult(resultEl, "Sending Peace Ping...", null);
-
-        // Submit ping with user_id
-        const response = await postJson("api/ping", {
-            user_id: userId,
-            target,
-            confirm_target: confirmTarget,
-            recipient_name: recipientName
-        });
-
-        if (!response.ok) {
-            const err = response.body.error || "Could not send ping.";
-            showResult(resultEl, err, "warn");
+        if (!validatePhone(target)) {
+            showResult(resultEl, "Please enter a valid mobile number. Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number]. Spaces are fine.", "warn");
             return;
         }
 
-        if (response.body.matched) {
-            // Show match found with success message
-            matchInfo.hidden = false;
-            matchMessage.textContent = "🎉 Match found! Check your SMS for the private preference link.";
-
-            showResult(resultEl, "🎉 Match found! Check your SMS for the private link.", "ok");
-        } else {
-            showResult(resultEl, "Peace Ping sent. You can track it from your dashboard; if they also ping you, both of you receive secure links for preferences.", "ok");
+        if (!confirmTarget) {
+            showResult(resultEl, "Please confirm the recipient number.", "warn");
+            return;
         }
-    } catch (error) {
-        showResult(resultEl, "Error checking login status.", "warn");
-    }
-});
+
+        if (normalizePhone(target) !== normalizePhone(confirmTarget)) {
+            showResult(resultEl, "The recipient numbers do not match. Please check both entries before sending.", "warn");
+            return;
+        }
+
+        // Hide previous match info
+        matchInfo.hidden = true;
+
+        // Check if user is logged in
+        try {
+            const statusResponse = await postJson("api/register", { action: 'status' });
+            if (!statusResponse.body.logged_in) {
+                showResult(resultEl, "Please register and log in first.", "warn");
+                return;
+            }
+
+            const userId = statusResponse.body.user.id;
+            showResult(resultEl, "Sending Peace Ping...", null);
+
+            // Submit ping with user_id
+            const response = await postJson("api/ping", {
+                user_id: userId,
+                target,
+                confirm_target: confirmTarget,
+                recipient_name: recipientName
+            });
+
+            if (!response.ok) {
+                const err = response.body.error || "Could not send ping.";
+                showResult(resultEl, err, "warn");
+                return;
+            }
+
+            if (response.body.matched) {
+                // Show match found with success message
+                matchInfo.hidden = false;
+                matchMessage.textContent = "🎉 Match found! Check your SMS for the private preference link.";
+
+                showResult(resultEl, "🎉 Match found! Check your SMS for the private link.", "ok");
+            } else {
+                showResult(resultEl, "Peace Ping sent. You can track it from your dashboard; if they also ping you, both of you receive secure links for preferences.", "ok");
+            }
+        } catch (error) {
+            showResult(resultEl, "Error checking login status.", "warn");
+        }
+    });
 }

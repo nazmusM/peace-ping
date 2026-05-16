@@ -63,6 +63,8 @@ class UserController
     {
         $phone = trim($input['phone'] ?? '');
         $confirmPhone = trim($input['confirm_phone'] ?? '');
+        $password = trim($input['password'] ?? '');
+        $confirmPassword = trim($input['confirm_password'] ?? '');
         $name = trim($input['name'] ?? 'Peace Ping User');
 
         if ($phone === '') {
@@ -80,12 +82,27 @@ class UserController
             return;
         }
 
+        if ($password === '') {
+            Response::json(['error' => 'Password is required.'], 400);
+            return;
+        }
+
+        if ($confirmPassword === '') {
+            Response::json(['error' => 'Please confirm your password.'], 400);
+            return;
+        }
+
+        if ($password !== $confirmPassword) {
+            Response::json(['error' => 'The passwords do not match. Please check both entries before continuing.'], 400);
+            return;
+        }
+
         if (strlen(preg_replace('/\D/', '', $phone) ?? '') < 8 || strlen(preg_replace('/\D/', '', $phone) ?? '') > 15) {
             Response::json(['error' => $this->userService->getPhoneFormatGuidance()], 400);
             return;
         }
 
-        $result = $this->userService->register($name, $phone);
+        $result = $this->userService->register($name, $phone, $password);
 
         Response::json($result);
     }
@@ -93,9 +110,15 @@ class UserController
     private function handleLogin(array $input): void
     {
         $phone = trim($input['phone'] ?? '');
+        $password = trim($input['password'] ?? '');
 
         if ($phone === '') {
             Response::json(['error' => 'Mobile number is required.'], 400);
+            return;
+        }
+
+        if ($password === '') {
+            Response::json(['error' => 'Password is required.'], 400);
             return;
         }
 
@@ -104,7 +127,7 @@ class UserController
             return;
         }
 
-        $result = $this->userService->requestLoginCode($phone);
+        $result = $this->userService->loginWithPassword($phone, $password);
 
         Response::json($result);
     }

@@ -18,13 +18,22 @@ class UserService
     ) {}
 
     /**
-     * Register a new user with encrypted contact information
+     * Register a new user with encrypted contact information and password
      */
-    public function register(string $name, string $phone): array
+    public function register(string $name, string $phone, string $password): array
     {
         $name = trim($name) !== '' ? trim($name) : 'Peace Ping User';
         if (strlen($name) > 120) {
             throw new InvalidArgumentException('Name must be less than 120 characters.');
+        }
+
+        // Validate password
+        if (strlen($password) < 8) {
+            throw new InvalidArgumentException('Password must be at least 8 characters long.');
+        }
+
+        if (!preg_match('/[A-Z]/', $password) || !preg_match('/[0-9]/', $password)) {
+            throw new InvalidArgumentException('Password must contain at least one uppercase letter and one number.');
         }
 
         // Validate phone
@@ -40,9 +49,10 @@ class UserService
             throw new InvalidArgumentException('This mobile number is already registered. Please log in instead.');
         }
 
-        // Generate verification code
         $verificationCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        $verificationExpiresAt = date('Y-m-d H:i:s', time() + 600); // 10 minutes
+        $verificationExpiresAt = date('Y-m-d H:i:s', time() + 600);
+
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
         // Encrypt contact info
         $encryptedContact = $this->encryption->encrypt($normalizedPhone);
@@ -50,34 +60,35 @@ class UserService
             // Update existing unverified user
             $update = $this->db->prepare("
                 UPDATE users 
-                SET name = ?, contact_encrypted = ?, verification_code = ?, verification_expires_at = ?
+                SET name = ?, contact_encrypted = ?, password_hash = ?, is_verified = FALSE,
+                    verification_code = ?, verification_expires_at = ?
                 WHERE id = ?
             ");
-            $update->bind_param('ssssi', $name, $encryptedContact, $verificationCode, $verificationExpiresAt, $existingUser['id']);
+            $update->bind_param('sssssi', $name, $encryptedContact, $passwordHash, $verificationCode, $verificationExpiresAt, $existingUser['id']);
             $update->execute();
             $update->close();
 
             $userId = $existingUser['id'];
         } else {
-            // Insert new user with verification info
+            // Insert new user with password
             $insert = $this->db->prepare("
-                INSERT INTO users (name, contact_encrypted, contact_hash, is_verified, verification_code, verification_expires_at)
-                VALUES (?, ?, ?, FALSE, ?, ?)
+                INSERT INTO users (name, contact_encrypted, contact_hash, password_hash, is_verified, verification_code, verification_expires_at)
+                VALUES (?, ?, ?, ?, FALSE, ?, ?)
             ");
-            $insert->bind_param('sssss', $name, $encryptedContact, $contactHash, $verificationCode, $verificationExpiresAt);
+            $insert->bind_param('ssssss', $name, $encryptedContact, $contactHash, $passwordHash, $verificationCode, $verificationExpiresAt);
             $insert->execute();
 
             $userId = $insert->insert_id;
             $insert->close();
         }
 
-        // Send SMS with verification code
         $this->notificationService->sendVerificationCode($normalizedPhone, $verificationCode);
 
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }
         $_SESSION['pending_verification_user_id'] = (int) $userId;
+        unset($_SESSION['user_id'], $_SESSION['user_name']);
 
         return [
             'user_id' => $userId,
@@ -85,7 +96,7 @@ class UserService
         ];
     }
 
-    public function requestLoginCode(string $phone): array
+    public function loginWithPassword(string $phone, string $password): array
     {
         $normalizedPhone = $this->fingerprint->formatPhone($phone);
         if (!$this->fingerprint->validateIdentifier($normalizedPhone)) {
@@ -94,30 +105,46 @@ class UserService
 
         $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
         $existingUser = $this->getUserByContactHash($contactHash);
-        if ($existingUser === null || (int) $existingUser['is_verified'] !== 1) {
-            throw new InvalidArgumentException('No verified account was found for that mobile number. Please register first.');
+
+        if ($existingUser === null) {
+            throw new InvalidArgumentException('No account was found for that mobile number. Please register first.');
         }
 
-        $verificationCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        $verificationExpiresAt = date('Y-m-d H:i:s', time() + 600);
+        if ((int) $existingUser['is_verified'] !== 1) {
+            throw new InvalidArgumentException('Your account is not verified. Please register again.');
+        }
 
-        $update = $this->db->prepare(
-            'UPDATE users SET verification_code = ?, verification_expires_at = ? WHERE id = ?'
+        // Check if user has a password
+        $select = $this->db->prepare(
+            'SELECT id, name, password_hash FROM users WHERE id = ? LIMIT 1'
         );
-        $update->bind_param('ssi', $verificationCode, $verificationExpiresAt, $existingUser['id']);
-        $update->execute();
-        $update->close();
+        $select->bind_param('i', $existingUser['id']);
+        $select->execute();
+        $user = $select->get_result()->fetch_assoc();
+        $select->close();
 
-        $this->notificationService->sendVerificationCode($normalizedPhone, $verificationCode);
+        if ($user === null || $user['password_hash'] === null) {
+            throw new InvalidArgumentException('This account does not have a password set. Please register again to set a password.');
+        }
 
+        // Verify password
+        if (!password_verify($password, $user['password_hash'])) {
+            throw new InvalidArgumentException('Invalid password. Please try again.');
+        }
+
+        // Log user in directly without OTP
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }
-        $_SESSION['pending_verification_user_id'] = (int) $existingUser['id'];
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['user_name'] = $user['name'];
+        unset($_SESSION['pending_verification_user_id']);
 
         return [
-            'user_id' => (int) $existingUser['id'],
-            'message' => 'Login code sent to your mobile number.'
+            'success' => true,
+            'user_id' => (int) $user['id'],
+            'name' => $user['name'],
+            'message' => 'Logged in successfully!'
         ];
     }
 
@@ -214,10 +241,18 @@ class UserService
             return null;
         }
 
+        $contact = '';
+        try {
+            $contact = $this->getUserContact((int) $_SESSION['user_id']) ?? '';
+        } catch (\Exception $e) {
+            error_log('Error getting user contact: ' . $e->getMessage());
+            $contact = '';
+        }
+
         return [
             'id' => $_SESSION['user_id'],
             'name' => $_SESSION['user_name'] ?? '',
-            'contact' => $this->getUserContact((int) $_SESSION['user_id']) ?? ''
+            'contact' => $contact
         ];
     }
 

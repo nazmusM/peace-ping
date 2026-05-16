@@ -31,6 +31,7 @@ CREATE TABLE users (
     name VARCHAR(120) NOT NULL,
     contact_encrypted TEXT NOT NULL,
     contact_hash CHAR(64) NOT NULL,
+    password_hash VARCHAR(255) NULL,
     is_verified TINYINT(1) NOT NULL DEFAULT 0,
     verification_code VARCHAR(6) NULL,
     verification_expires_at TIMESTAMP NULL,
