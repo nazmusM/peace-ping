@@ -458,6 +458,41 @@ class PeacePingService
         }
     }
 
+    public function deletePing(int $pingId, int $userId): bool
+    {
+        $ping = $this->db->prepare(
+            'SELECT id, fingerprint_self, fingerprint_target FROM pings WHERE id = ? AND user_id = ? LIMIT 1'
+        );
+        $ping->bind_param('ii', $pingId, $userId);
+        $ping->execute();
+        $row = $ping->get_result()->fetch_assoc();
+        $ping->close();
+
+        if (!$row) {
+            return false;
+        }
+
+        $hasMatch = $this->db->prepare(
+            'SELECT COUNT(*) as count FROM pings
+             WHERE fingerprint_self = ? AND fingerprint_target = ? AND user_id != ?'
+        );
+        $hasMatch->bind_param('ssi', $row['fingerprint_target'], $row['fingerprint_self'], $userId);
+        $hasMatch->execute();
+        $matchCount = (int) $hasMatch->get_result()->fetch_assoc()['count'];
+        $hasMatch->close();
+
+        if ($matchCount > 0) {
+            return false;
+        }
+
+        $delete = $this->db->prepare('DELETE FROM pings WHERE id = ? AND user_id = ?');
+        $delete->bind_param('ii', $pingId, $userId);
+        $deleted = $delete->execute();
+        $delete->close();
+
+        return $deleted;
+    }
+
     private function resetMatch(int $matchId): void
     {
         $match = $this->getMatchById($matchId);

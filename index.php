@@ -137,6 +137,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
         'home' => 'Home',
         'how-it-works' => 'How It Works',
         'ping' => 'Send Ping',
+        'faq' => 'FAQ',
         'dashboard' => 'Dashboard',
         'contact' => 'Contact'
     ];
@@ -147,6 +148,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
             'register' => 'Register',
             'login' => 'Login',
             'ping' => 'Send Ping',
+            'faq' => 'FAQ',
             'dashboard' => 'Dashboard',
             'contact' => 'Contact'
         ];
@@ -207,8 +209,90 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                 <p>&copy; <?php echo date('Y') ?> Peace Ping. Reconnecting people thoughtfully.</p>
             </div>
         </footer>
-        <?php if ($isLoggedIn): ?>
-            <script>
+        <!-- Modal -->
+        <div id="app-modal" class="modal-overlay">
+            <div class="modal-card" role="dialog" aria-modal="true">
+                <div class="modal-icon" id="modal-icon"></div>
+                <h3 id="modal-title" class="modal-title"></h3>
+                <p id="modal-message" class="modal-message"></p>
+                <div class="modal-actions" id="modal-actions"></div>
+            </div>
+        </div>
+
+        <script>
+            const modal = document.getElementById('app-modal');
+            const modalIcon = document.getElementById('modal-icon');
+            const modalTitle = document.getElementById('modal-title');
+            const modalMsg = document.getElementById('modal-message');
+            const modalActions = document.getElementById('modal-actions');
+
+            function openModal() {
+                modal.classList.add('open');
+            }
+
+            function closeModal() {
+                modal.classList.remove('open');
+            }
+
+            async function showConfirm(title, message) {
+                return new Promise((resolve) => {
+                    modalIcon.textContent = '?';
+                    modalIcon.style.background = 'rgba(217, 119, 6, 0.12)';
+                    modalIcon.style.color = '#d97706';
+                    modalTitle.textContent = title;
+                    modalMsg.textContent = message;
+
+                    modalActions.innerHTML = `
+                        <button class="btn btn-sm btn-modal-cancel" id="modal-cancel">Cancel</button>
+                        <button class="btn btn-sm btn-modal-confirm" id="modal-confirm">Yes, Cancel Ping</button>
+                    `;
+
+                    openModal();
+
+                    const onCancel = () => { closeModal(); resolve(false); cleanup(); };
+                    const onConfirm = () => { closeModal(); resolve(true); cleanup(); };
+                    const onOverlay = (e) => { if (e.target === modal) { closeModal(); resolve(false); cleanup(); } };
+
+                    function cleanup() {
+                        document.getElementById('modal-cancel').removeEventListener('click', onCancel);
+                        document.getElementById('modal-confirm').removeEventListener('click', onConfirm);
+                        modal.removeEventListener('click', onOverlay);
+                    }
+
+                    document.getElementById('modal-cancel').addEventListener('click', onCancel);
+                    document.getElementById('modal-confirm').addEventListener('click', onConfirm);
+                    modal.addEventListener('click', onOverlay);
+                });
+            }
+
+            async function showAlert(title, message) {
+                return new Promise((resolve) => {
+                    modalIcon.textContent = 'i';
+                    modalIcon.style.background = 'rgba(8, 145, 178, 0.12)';
+                    modalIcon.style.color = '#0891b2';
+                    modalTitle.textContent = title;
+                    modalMsg.textContent = message;
+
+                    modalActions.innerHTML = `
+                        <button class="btn btn-sm btn-modal-ok" id="modal-ok">OK</button>
+                    `;
+
+                    openModal();
+
+                    const onOk = () => { closeModal(); resolve(); cleanup(); };
+                    const onOverlay = (e) => { if (e.target === modal) { closeModal(); resolve(); cleanup(); } };
+
+                    function cleanup() {
+                        document.getElementById('modal-ok').removeEventListener('click', onOk);
+                        modal.removeEventListener('click', onOverlay);
+                    }
+
+                    document.getElementById('modal-ok').addEventListener('click', onOk);
+                    modal.addEventListener('click', onOverlay);
+                });
+            }
+
+            <?php if ($isLoggedIn): ?>
                 document.getElementById('logout-button')?.addEventListener('click', async () => {
                     await fetch('/api/register', {
                         method: 'POST',
@@ -221,8 +305,8 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                     });
                     window.location.href = '/';
                 });
-            </script>
-        <?php endif; ?>
+            <?php endif; ?>
+        </script>
     </body>
 
     </html>
@@ -288,6 +372,11 @@ function getDashboardSummary(mysqli $db, int $userId): array
     $result = $stmt->get_result();
 
     while ($row = $result->fetch_assoc()) {
+        $created = new DateTime((string) $row['created_at']);
+        $expires = (clone $created)->modify('+30 days');
+        $now = new DateTime();
+        $daysLeft = $now > $expires ? 0 : max(1, (int) $now->diff($expires)->format('%a') + 1);
+        $row['days_until_expiry'] = $daysLeft;
         $pings[] = $row;
     }
     $stmt->close();
@@ -367,6 +456,30 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
         exit;
     }
 
+    if ($path === '/api/delete-ping') {
+        $currentUser = $userService->getCurrentUser();
+        if ($currentUser === null) {
+            Response::json(['error' => 'Not authenticated.'], 401);
+            exit;
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true);
+        $pingId = isset($input['ping_id']) ? (int) $input['ping_id'] : 0;
+
+        if ($pingId <= 0) {
+            Response::json(['error' => 'Invalid ping ID.'], 400);
+            exit;
+        }
+
+        $deleted = $peacePingService->deletePing($pingId, (int) $currentUser['id']);
+        if ($deleted) {
+            Response::json(['success' => true, 'message' => 'Peace Ping cancelled.']);
+        } else {
+            Response::json(['error' => 'Could not cancel ping. It may already be matched or not found.'], 400);
+        }
+        exit;
+    }
+
     // 404 for API
     Response::json(['error' => 'API endpoint not found.'], 404);
 }
@@ -434,7 +547,7 @@ if ($path === '/how-it-works') {
             <p>Simple, thoughtful reconnection without the pressure of direct outreach.</p>
         </div>
 
-        <div class="steps">
+        <div class="steps-grid hiw-steps">
             <div class="step">
                 <div class="step-number">1</div>
                 <div class="step-content">
@@ -465,17 +578,34 @@ if ($path === '/how-it-works') {
             </div>
         </div>
 
-        <div class="privacy card">
+        <div class="privacy-simple">
             <h2>🔒 Your Privacy Matters</h2>
-            <p>Peace Ping is designed with privacy at its core:</p>
-            <ul>
-                <li><strong>Fingerprint Matching:</strong> Submitted numbers are normalized, fingerprinted, and compared as hashes</li>
-                <li><strong>No Raw Target Storage:</strong> Raw numbers entered for matching are not stored after submission</li>
-                <li><strong>Limited Visibility:</strong> The platform cannot read raw submitted target numbers or a raw-number "who wants whom" list</li>
-                <li><strong>Encrypted Account Contact:</strong> Your own verified mobile is encrypted for SMS delivery</li>
-                <li><strong>No Unwanted Contact:</strong> No information is shared unless there's mutual interest</li>
-                <li><strong>You're in Control:</strong> You decide when and how to reconnect</li>
-            </ul>
+            <div class="privacy-grid">
+                <div class="privacy-item">
+                    <h3>Anonymous Matching</h3>
+                    <p>Phone numbers are converted into secure codes before any matching happens.</p>
+                </div>
+                <div class="privacy-item">
+                    <h3>No Storage of Numbers</h3>
+                    <p>The numbers you enter for matching are never stored in readable form.</p>
+                </div>
+                <div class="privacy-item">
+                    <h3>Encrypted Account</h3>
+                    <p>Your own mobile number is encrypted and only used for SMS delivery.</p>
+                </div>
+                <div class="privacy-item">
+                    <h3>Mutual Consent Only</h3>
+                    <p>No information is ever shared unless both people independently ping each other.</p>
+                </div>
+                <div class="privacy-item">
+                    <h3>You Stay in Control</h3>
+                    <p>You decide if and when to reconnect, with guidance that respects both preferences.</p>
+                </div>
+                <div class="privacy-item">
+                    <h3>No Unwanted Contact</h3>
+                    <p>We never share your contact details with anyone without your explicit consent.</p>
+                </div>
+            </div>
         </div>
     </div>
 <?php
@@ -935,84 +1065,88 @@ if ($path === '/ping') {
             <p>Take the first step towards reconnection</p>
         </div>
 
-        <section class="grid">
-            <article class="card">
-                <h2>📤 Send Your Peace Ping</h2>
-                <form id="ping-form">
-                    <div class="form-group">
-                        <label for="recipient-name">Recipient Name (Optional)</label>
-                        <input type="text" id="recipient-name" name="recipient_name" placeholder="Jane Doe" maxlength="120" autocomplete="off">
-                    </div>
-                    <div class="form-group">
-                        <label for="ping-target">Mobile Number to Ping</label>
-                        <input type="tel" id="ping-target" name="target" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
-                        <small>Use 07xxx xxxxxx, +447xxx xxxxxx, or international +[country code][number]. We auto-normalise spacing and common UK formats.</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="ping-target-confirm">Confirm Recipient Number</label>
-                        <input type="tel" id="ping-target-confirm" name="confirm_target" placeholder="Re-enter recipient number" autocomplete="tel" inputmode="tel" required>
-                        <p class="field-error" id="ping-target-confirm-error" aria-live="polite"></p>
-                    </div>
-                    <button type="submit" class="btn">Send Peace Ping</button>
-                </form>
-                <p id="ping-result" class="result" aria-live="polite"></p>
+        <div class="ping-layout">
+            <div class="ping-row-2col">
+                <article class="card">
+                    <h2>📤 Send Your Peace Ping</h2>
+                    <form id="ping-form">
+                        <div class="form-group">
+                            <label for="recipient-name">Recipient Name (Optional)</label>
+                            <input type="text" id="recipient-name" name="recipient_name" placeholder="Jane Doe" maxlength="120" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="ping-target">Mobile Number to Ping</label>
+                            <input type="tel" id="ping-target" name="target" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
+                            <small>Use 07xxx xxxxxx, +447xxx xxxxxx, or international +[country code][number]. We auto-normalise spacing and common UK formats.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="ping-target-confirm">Confirm Recipient Number</label>
+                            <input type="tel" id="ping-target-confirm" name="confirm_target" placeholder="Re-enter recipient number" autocomplete="tel" inputmode="tel" required>
+                            <p class="field-error" id="ping-target-confirm-error" aria-live="polite"></p>
+                        </div>
+                        <button type="submit" class="btn">Send Peace Ping</button>
+                    </form>
+                    <p id="ping-result" class="result" aria-live="polite"></p>
 
-                <div id="match-info" hidden>
-                    <h3>🎊 Match Found!</h3>
-                    <p id="match-message"></p>
-                    <div id="next-steps">
-                        <h4>What happens next?</h4>
-                        <p>Both you and the other person will receive SMS messages with questions to help you reconnect comfortably.</p>
+                    <div id="match-info" hidden>
+                        <h3>🎊 Match Found!</h3>
+                        <p id="match-message"></p>
+                        <div id="next-steps">
+                            <h4>What happens next?</h4>
+                            <p>Both you and the other person will receive SMS messages with questions to help you reconnect comfortably.</p>
+                        </div>
                     </div>
-                </div>
-            </article>
+                </article>
 
-            <article class="card">
-                <h2>🔒 What We Store</h2>
-                <p>For matching, the number you enter is immediately normalized and fingerprinted with a private server secret.</p>
-                <ul class="trust-list">
-                    <li>Raw submitted target numbers are not stored.</li>
-                    <li>Matching compares fingerprints, not readable phone numbers.</li>
-                    <li>No one is notified unless both people independently ping each other.</li>
-                </ul>
-            </article>
+                <article class="card">
+                    <h2>🔒 What We Store</h2>
+                    <p>We do not store readable versions of the numbers you submit for matching.</p>
+                    <p>Instead, they are immediately converted into secure anonymous codes. The codes still allow the system to detect mutual matches without revealing to us the actual phone numbers being entered.</p>
+                    <ul class="trust-list">
+                        <li>No one is notified unless both people independently ping each other.</li>
+                        <li>No readable phone numbers are stored in the system after submission.</li>
+                        <li>Your privacy is protected at every step.</li>
+                    </ul>
+                </article>
+            </div>
 
-            <article class="card">
+            <article class="card ping-how-full">
                 <h2>🤔 How It Works</h2>
-                <div class="steps">
+                <div class="steps-grid">
                     <div class="step">
                         <div class="step-number">1</div>
                         <div class="step-content">
-                            <h3>You Send a Ping</h3>
-                            <p>Submit someone's contact information. They won't know unless they also ping you.</p>
+                            <h3>Send Your Peace Ping</h3>
+                            <p>Think of someone you'd like to reconnect with and send them a Peace Ping using their contact information.</p>
                         </div>
                     </div>
                     <div class="step">
                         <div class="step-number">2</div>
                         <div class="step-content">
-                            <h3>They Send a Ping Too</h3>
-                            <p>If they also ping you, our system creates a match and notifies both of you.</p>
+                            <h3>Wait for Mutual Interest</h3>
+                            <p>If they also send you a Peace Ping, our system detects a mutual connection and notifies both of you.</p>
                         </div>
                     </div>
                     <div class="step">
                         <div class="step-number">3</div>
                         <div class="step-content">
-                            <h3>Private Links Sent</h3>
-                            <p>Both receive secure SMS links to share reconnection preferences.</p>
+                            <h3>Share Your Preferences</h3>
+                            <p>Both people receive private links to share their comfort level with reconnecting.</p>
                         </div>
                     </div>
                     <div class="step">
                         <div class="step-number">4</div>
                         <div class="step-content">
-                            <h3>Final Messages</h3>
-                            <p>Based on preferences, you receive guidance for reconnection.</p>
+                            <h3>Reconnect Thoughtfully</h3>
+                            <p>Based on both preferences, you'll receive guidance on the best way to reconnect.</p>
                         </div>
                     </div>
                 </div>
             </article>
-        </section>
+        </div>
     </div>
 
+    <script id="user-data" type="application/json"><?php echo json_encode(['user_id' => (int) $currentUser['id'], 'name' => $currentUser['name'] ?? '']); ?></script>
     <script src="/app.js"></script>
 <?php
     $content = ob_get_clean();
@@ -1093,10 +1227,14 @@ if ($path === '/dashboard') {
                     $finalMessage = ($status === 'completed' && !empty($ping['match_id']))
                         ? $peacePingService->getFinalMessageForMatch((int) $ping['match_id'])
                         : null;
+                    $daysLeft = (int) ($ping['days_until_expiry'] ?? 30);
                     ?>
                     <div class="ping-card dashboard-ping">
-                        <div>
-                            <div class="match-date">Submitted <?php echo htmlspecialchars($created); ?></div>
+                        <div class="ping-card-main">
+                            <div class="ping-card-top">
+                                <span class="match-date">Submitted <?php echo htmlspecialchars($created); ?></span>
+                                <span class="ping-status <?php echo htmlspecialchars($status); ?>"><?php echo htmlspecialchars($label); ?></span>
+                            </div>
                             <strong>Peace Ping to <?php echo htmlspecialchars($displayTarget); ?></strong>
                             <p>
                                 <?php if ($status === 'pending'): ?>
@@ -1111,11 +1249,16 @@ if ($path === '/dashboard') {
                                     Completed. Check your latest SMS or final update.
                                 <?php endif; ?>
                             </p>
+                            <?php if ($status === 'pending' || $status === 'matched'): ?>
+                                <small class="expiry-note">Expires in <?php echo $daysLeft; ?> day<?php echo $daysLeft !== 1 ? 's' : ''; ?></small>
+                            <?php endif; ?>
                         </div>
                         <div class="ping-actions">
-                            <span class="ping-status <?php echo htmlspecialchars($status); ?>"><?php echo htmlspecialchars($label); ?></span>
                             <?php if ($token !== ''): ?>
-                                <a href="/preferences?token=<?php echo urlencode($token); ?>" class="btn btn-secondary">Preferences</a>
+                                <a href="/preferences?token=<?php echo urlencode($token); ?>" class="btn btn-sm btn-secondary">Preferences</a>
+                            <?php endif; ?>
+                            <?php if ($status === 'pending'): ?>
+                                <button type="button" class="btn btn-sm btn-danger btn-delete-ping" data-ping-id="<?php echo (int) $ping['id']; ?>">Cancel</button>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -1123,12 +1266,97 @@ if ($path === '/dashboard') {
             <?php endif; ?>
         </section>
     </div>
+
+    <script>
+        document.querySelectorAll('.btn-delete-ping').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const pingId = this.dataset.pingId;
+
+                const confirmed = await showConfirm(
+                    'Cancel Peace Ping?',
+                    'This will permanently remove this Peace Ping. The other person will never know you sent it. This cannot be undone.'
+                );
+                if (!confirmed) return;
+
+                this.disabled = true;
+                this.textContent = 'Cancelling...';
+
+                try {
+                    const response = await fetch('/api/delete-ping', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ping_id: parseInt(pingId) })
+                    });
+                    const data = await response.json();
+
+                    if (response.ok && data.success) {
+                        this.closest('.ping-card').remove();
+                    } else {
+                        await showAlert('Could Not Cancel', data.error || 'Could not cancel ping.');
+                        this.disabled = false;
+                        this.textContent = 'Cancel';
+                    }
+                } catch (e) {
+                    await showAlert('Error', 'Error cancelling ping.');
+                    this.disabled = false;
+                    this.textContent = 'Cancel';
+                }
+            });
+        });
+    </script>
 <?php
     $content = ob_get_clean();
     renderPage('Dashboard', $content, 'dashboard');
     exit;
 }
 
+
+// FAQ page
+if ($path === '/faq') {
+    ob_start();
+?>
+    <div class="faq-page">
+        <div class="page-header">
+            <h1>Frequently Asked Questions</h1>
+            <p>Everything you need to know about Peace Ping</p>
+        </div>
+
+        <section class="faq-list">
+            <div class="faq-item">
+                <h3>Is my information secure?</h3>
+                <p>Yes. All contact information is encrypted. The numbers you enter for matching are immediately converted into secure anonymous codes, so no readable phone numbers are stored. Your information is only shared when there's mutual consent from both parties.</p>
+            </div>
+            <div class="faq-item">
+                <h3>What if the other person doesn't ping me back?</h3>
+                <p>Nothing happens. Your Peace Ping remains completely private, and no information is shared with anyone. The other person will never know you pinged them unless they also ping you.</p>
+            </div>
+            <div class="faq-item">
+                <h3>Can I delete my account?</h3>
+                <p>Yes. You can request deletion at any time and we will remove all your information from our system. Contact us through the Contact page to request account deletion.</p>
+            </div>
+            <div class="faq-item">
+                <h3>How long does my Peace Ping stay active?</h3>
+                <p>Peace Pings remain active for 30 days. After that, they expire automatically and are removed from the system. You can always send a new Peace Ping at any time.</p>
+            </div>
+            <div class="faq-item">
+                <h3>Can I cancel a Peace Ping before it matches?</h3>
+                <p>Yes. If you have sent a Peace Ping that has not yet been reciprocated, you can cancel it from your Dashboard. Once a mutual match has been detected, cancellation is no longer possible.</p>
+            </div>
+            <div class="faq-item">
+                <h3>How does the matching process work?</h3>
+                <p>When you send a Peace Ping, your phone number and the recipient's number are converted into secure anonymous codes (fingerprints). The system checks if the recipient has also sent a Peace Ping with your number. If both of you have independently pinged each other, a mutual match is detected and both parties are notified.</p>
+            </div>
+            <div class="faq-item">
+                <h3>What happens after a match is found?</h3>
+                <p>Both people receive private SMS links to share their reconnection preferences. Based on both preferences, the system provides guidance on how to reconnect. Your preferences remain private and are never shared with the other person.</p>
+            </div>
+        </section>
+    </div>
+<?php
+    $content = ob_get_clean();
+    renderPage('FAQ', $content, 'faq');
+    exit;
+}
 
 // Contact page
 if ($path === '/contact') {
@@ -1147,7 +1375,7 @@ if ($path === '/contact') {
                 <div class="contact-method">
                     <h3>💬 Support</h3>
                     <p>Need help with a Peace Ping?</p>
-                    <p>Check our <a href="/how-it-works">How It Works</a> page first</p>
+                    <p>Check our <a href="/faq">FAQ</a> or <a href="/how-it-works">How It Works</a> page first</p>
                 </div>
                 <div class="contact-method">
                     <h3>🔒 Privacy</h3>
@@ -1161,26 +1389,6 @@ if ($path === '/contact') {
                 </div>
             </div>
         </div>
-
-        <section class="faq">
-            <h2>Frequently Asked Questions</h2>
-            <div class="faq-item">
-                <h3>Is my information secure?</h3>
-                <p>Yes. All contact information is encrypted and only shared when there's mutual consent.</p>
-            </div>
-            <div class="faq-item">
-                <h3>What if the other person doesn't ping me back?</h3>
-                <p>Nothing happens. Your Peace Ping remains private, and no information is shared.</p>
-            </div>
-            <div class="faq-item">
-                <h3>Can I delete my account?</h3>
-                <p>Yes. You can request deletion at any time and we'll remove all your information.</p>
-            </div>
-            <div class="faq-item">
-                <h3>How long does my Peace Ping stay active?</h3>
-                <p>Peace Pings remain active for 30 days. After that, they expire and you can send new ones.</p>
-            </div>
-        </section>
     </div>
 <?php
     $content = ob_get_clean();

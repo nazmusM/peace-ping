@@ -177,18 +177,29 @@ if (pingForm) {
         // Hide previous match info
         matchInfo.hidden = true;
 
-        // Check if user is logged in
+        // Get user data from embedded JSON
+        const userDataEl = document.getElementById('user-data');
+        if (!userDataEl) {
+            showResult(resultEl, "You are not logged in. Please register or log in.", "warn");
+            return;
+        }
+        let userData;
         try {
-            const statusResponse = await postJson("api/register", { action: 'status' });
-            if (!statusResponse.body.logged_in) {
-                showResult(resultEl, "Please register and log in first.", "warn");
-                return;
-            }
+            userData = JSON.parse(userDataEl.textContent);
+        } catch (e) {
+            showResult(resultEl, "You are not logged in. Please register or log in.", "warn");
+            return;
+        }
+        if (!userData || !userData.user_id) {
+            showResult(resultEl, "You are not logged in. Please register or log in.", "warn");
+            return;
+        }
 
-            const userId = statusResponse.body.user.id;
-            showResult(resultEl, "Sending Peace Ping...", null);
+        const userId = userData.user_id;
+        showResult(resultEl, "Sending Peace Ping...", null);
 
-            // Submit ping with user_id
+        // Submit ping with user_id
+        try {
             const response = await postJson("api/ping", {
                 user_id: userId,
                 target,
@@ -203,16 +214,14 @@ if (pingForm) {
             }
 
             if (response.body.matched) {
-                // Show match found with success message
                 matchInfo.hidden = false;
                 matchMessage.textContent = "🎉 Match found! Check your SMS for the private preference link.";
-
                 showResult(resultEl, "🎉 Match found! Check your SMS for the private link.", "ok");
             } else {
                 showResult(resultEl, "Peace Ping sent. You can track it from your dashboard; if they also ping you, both of you receive secure links for preferences.", "ok");
             }
         } catch (error) {
-            showResult(resultEl, "Error checking login status.", "warn");
+            showResult(resultEl, "Error sending Peace Ping.", "warn");
         }
     });
 }
