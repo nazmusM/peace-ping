@@ -17,14 +17,6 @@ class PeacePingService
         private readonly string $portalUrl = ''
     ) {}
 
-    private function writeDebugLog(string $msg): void
-    {
-        $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'error_log.txt';
-        $logMessage = date('c') . ' PeacePingService::writeDebugLog: ' . $msg . PHP_EOL;
-        @file_put_contents($path, $logMessage, FILE_APPEND | LOCK_EX);
-        error_log("PeacePingService::writeDebugLog: {$msg}");
-    }
-
     public function submitPing(int $userId, string $targetIdentifier, string $recipientName = ''): array
     {
         $userContact = $this->userService->getUserContact($userId);
@@ -59,7 +51,6 @@ class PeacePingService
                  recipient_name = COALESCE(NULLIF(VALUES(recipient_name), \'\'), recipient_name)'
         );
         if ($insert === false) {
-            $this->writeDebugLog('PeacePingService::submitPing - prepare insert pings failed: ' . $this->db->error);
             throw new \RuntimeException('Database error while saving ping.');
         }
         $insert->bind_param(
@@ -72,8 +63,7 @@ class PeacePingService
         );
         $ok = $insert->execute();
         if ($ok === false) {
-            $this->writeDebugLog('PeacePingService::submitPing - insert pings error: ' . $insert->error . ' DB error: ' . $this->db->error);
-            $insert->close();
+                $insert->close();
             throw new \RuntimeException('Database error while saving ping.');
         }
         $insert->close();
@@ -84,13 +74,11 @@ class PeacePingService
              ORDER BY created_at DESC LIMIT 1'
         );
         if ($reversePing === false) {
-            $this->writeDebugLog('PeacePingService::submitPing - prepare reverse ping failed: ' . $this->db->error);
             throw new \RuntimeException('Database error while checking for reverse ping.');
         }
         $reversePing->bind_param('ssi', $fingerprintTarget, $userFingerprint, $userId);
         $ok = $reversePing->execute();
         if ($ok === false) {
-            $this->writeDebugLog('PeacePingService::submitPing - reverse select error: ' . $reversePing->error . ' DB error: ' . $this->db->error);
             $reversePing->close();
             throw new \RuntimeException('Database error while checking for reverse ping.');
         }
@@ -155,13 +143,11 @@ class PeacePingService
 
     private function createMatch(int $userAId, int $userBId, string $fingerprintA, string $fingerprintB): ?int
     {
-        $this->writeDebugLog('PeacePingService::createMatch - preparing existing match select');
         $existingMatch = $this->db->prepare(
             'SELECT id FROM matches
              WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)'
         );
         if ($existingMatch === false) {
-            $this->writeDebugLog('PeacePingService::createMatch - prepare existing match failed: ' . $this->db->error);
             return null;
         }
         $existingMatch->bind_param('iiii', $userAId, $userBId, $userBId, $userAId);
@@ -175,13 +161,11 @@ class PeacePingService
         }
         $existingMatch->close();
 
-        $this->writeDebugLog('PeacePingService::createMatch - preparing insert match');
         $insert = $this->db->prepare(
             'INSERT INTO matches (user_a_id, user_b_id, fingerprint_a, fingerprint_b, stage, created_at)
              VALUES (?, ?, ?, ?, 2, NOW())'
         );
         if ($insert === false) {
-            $this->writeDebugLog('PeacePingService::createMatch - prepare insert match failed: ' . $this->db->error);
             return null;
         }
         $insert->bind_param('iiss', $userAId, $userBId, $fingerprintA, $fingerprintB);
@@ -202,23 +186,19 @@ class PeacePingService
         $tokenB = bin2hex(random_bytes(32));
         $expiresAt = date('Y-m-d H:i:s', time() + 7 * 24 * 60 * 60);
 
-        $this->writeDebugLog('PeacePingService::sendStage2Notifications - preparing insert match_tokens');
         $stmt = $this->db->prepare(
             'INSERT INTO match_tokens (match_id, user_id, token, created_at, expires_at)
              VALUES (?, ?, ?, NOW(), ?)'
         );
         if ($stmt === false) {
-            $this->writeDebugLog('PeacePingService::sendStage2Notifications - prepare match_tokens failed: ' . $this->db->error);
             return;
         }
         $stmt->bind_param('iiss', $matchId, $userAId, $tokenA, $expiresAt);
         if (!$stmt->execute()) {
-            $this->writeDebugLog('PeacePingService::sendStage2Notifications - execute tokenA failed: ' . $stmt->error . ' DB error: ' . $this->db->error);
         }
 
         $stmt->bind_param('iiss', $matchId, $userBId, $tokenB, $expiresAt);
         if (!$stmt->execute()) {
-            $this->writeDebugLog('PeacePingService::sendStage2Notifications - execute tokenB failed: ' . $stmt->error . ' DB error: ' . $this->db->error);
         }
         $stmt->close();
 
@@ -446,7 +426,6 @@ class PeacePingService
         $query = "SHOW COLUMNS FROM {$table} LIKE '{$columnEscaped}'";
         $result = $this->db->query($query);
         if ($result === false) {
-            $this->writeDebugLog('PeacePingService::ensureColumn - SHOW COLUMNS query failed: ' . $this->db->error . ' query=' . $query);
             throw new \RuntimeException('Database error while checking ping metadata columns.');
         }
 

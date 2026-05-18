@@ -205,9 +205,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
         </main>
 
         <footer class="footer">
-            <div class="container">
                 <p>&copy; <?php echo date('Y') ?> Peace Ping. Reconnecting people thoughtfully.</p>
-            </div>
         </footer>
         <!-- Modal -->
         <div id="app-modal" class="modal-overlay">
@@ -442,14 +440,10 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
     }
 
     if ($path === '/api/ping') {
-        $logEntry = sprintf("[%s] API PING %s %s\n", date('c'), $_SERVER['REQUEST_METHOD'], $path);
-        file_put_contents(__DIR__ . '/error_log.txt', $logEntry, FILE_APPEND | LOCK_EX);
-
         try {
             $pingController = new PingController($peacePingService, $rateLimiter, $userService);
             $pingController->handle($_SERVER['REMOTE_ADDR']);
         } catch (Exception $e) {
-            file_put_contents(__DIR__ . '/error_log.txt', '[' . date('c') . '] Ping controller catch: ' . $e->getMessage() . '\n', FILE_APPEND | LOCK_EX);
             error_log('Ping controller error: ' . $e->getMessage());
             Response::json(['error' => 'Internal server error.'], 500);
         }

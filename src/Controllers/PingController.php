@@ -63,22 +63,13 @@ class PingController
 
             Response::json($result, 200);
         } catch (InvalidArgumentException $exception) {
-            $message = 'Ping invalid argument: ' . $exception->getMessage();
-            $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'error_log.txt';
-            file_put_contents($path, date('c') . ' ' . $message . PHP_EOL, FILE_APPEND | LOCK_EX);
-            error_log($message);
+            error_log('Ping invalid argument: ' . $exception->getMessage());
             Response::json(['error' => $exception->getMessage()], 422);
         } catch (RuntimeException $exception) {
-            $message = 'Ping runtime exception: ' . $exception->getMessage();
-            $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'error_log.txt';
-            file_put_contents($path, date('c') . ' ' . $message . PHP_EOL, FILE_APPEND | LOCK_EX);
-            error_log($message);
+            error_log('Ping runtime exception: ' . $exception->getMessage());
             Response::json(['error' => $exception->getMessage()], 429);
         } catch (Throwable $exception) {
-            $message = 'Ping error: ' . $exception->getMessage();
-            $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'error_log.txt';
-            file_put_contents($path, date('c') . ' ' . $message . ' trace=' . $exception->getTraceAsString() . PHP_EOL, FILE_APPEND | LOCK_EX);
-            error_log($message . ' trace=' . $exception->getTraceAsString());
+            error_log('Ping error: ' . $exception->getMessage() . ' trace=' . $exception->getTraceAsString());
             Response::json(['error' => 'Internal server error.'], 500);
         }
     }

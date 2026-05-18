@@ -1016,11 +1016,6 @@ p {
     }
 }
 
-.ping-how-full .steps-grid {
-    max-width: 800px;
-    margin: 0 auto;
-}
-
 /* How It Works Steps Grid (2x2) */
 .steps-grid {
     display: grid;
