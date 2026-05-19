@@ -48,6 +48,15 @@ class UserController
                 case 'logout':
                     $this->handleLogout();
                     break;
+                case 'send_reset_otp':
+                    $this->handleSendResetOtp($input);
+                    break;
+                case 'verify_reset_otp':
+                    $this->handleVerifyResetOtp($input);
+                    break;
+                case 'reset_password':
+                    $this->handleResetPassword($input);
+                    break;
                 default:
                     Response::json(['error' => 'Invalid action.'], 400);
             }
@@ -176,6 +185,66 @@ class UserController
     {
         $this->userService->logout();
         Response::json(['message' => 'Logged out successfully.']);
+    }
+
+    private function handleSendResetOtp(array $input): void
+    {
+        $phone = trim($input['phone'] ?? '');
+
+        if ($phone === '') {
+            Response::json(['error' => 'Mobile number is required.'], 400);
+            return;
+        }
+
+        $result = $this->userService->sendResetOtp($phone);
+        Response::json($result);
+    }
+
+    private function handleVerifyResetOtp(array $input): void
+    {
+        $phone = trim($input['phone'] ?? '');
+        $code = trim($input['code'] ?? '');
+
+        if ($phone === '') {
+            Response::json(['error' => 'Mobile number is required.'], 400);
+            return;
+        }
+
+        if ($code === '') {
+            Response::json(['error' => 'Verification code is required.'], 400);
+            return;
+        }
+
+        if (!preg_match('/^[0-9]{6}$/', $code)) {
+            Response::json(['error' => 'Verification code must be exactly 6 digits.'], 400);
+            return;
+        }
+
+        try {
+            $result = $this->userService->verifyResetOtp($phone, $code);
+            Response::json($result);
+        } catch (\Exception $e) {
+            Response::json(['error' => $e->getMessage()], 400);
+        }
+    }
+
+    private function handleResetPassword(array $input): void
+    {
+        $phone = trim($input['phone'] ?? '');
+        $password = trim($input['password'] ?? '');
+        $confirmPassword = trim($input['confirm_password'] ?? '');
+
+        if ($phone === '') {
+            Response::json(['error' => 'Mobile number is required.'], 400);
+            return;
+        }
+
+        try {
+            $result = $this->userService->resetPassword($phone, $password, $confirmPassword);
+            Response::json($result);
+        } catch (\Exception $e) {
+            Response::json(['error' => $e->getMessage()], 400);
+        }
     }
 
     /**

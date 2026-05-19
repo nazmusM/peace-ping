@@ -22,9 +22,6 @@ class SmsService
      */
     public function sendSms(string $phoneNumber, string $message): bool
     {
-        error_log('SmsService::sendSms called with phone: ' . $phoneNumber);
-        error_log('Twilio config - SID: ' . substr($this->accountSid, 0, 8) . '..., From: ' . $this->fromNumber);
-
         if (empty($this->accountSid) || empty($this->authToken)) {
             error_log('Twilio credentials are not configured.');
             return false;
@@ -41,8 +38,6 @@ class SmsService
             return false;
         }
 
-        error_log('Formatted phone number: ' . $phoneNumber);
-
         $url = "https://api.twilio.com/2010-04-01/Accounts/{$this->accountSid}/Messages.json";
 
         $payload = [
@@ -58,9 +53,6 @@ class SmsService
 
         $postData = http_build_query($payload);
 
-        error_log('Twilio API URL: ' . $url);
-        error_log('POST data: From=' . $this->fromNumber . ', To=' . $phoneNumber);
-
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_POST, true);
@@ -74,17 +66,12 @@ class SmsService
         $error = curl_error($ch);
         curl_close($ch);
 
-        error_log('Twilio response - HTTP Code: ' . $httpCode . ', cURL error: ' . ($error ?: 'none'));
-        error_log('Twilio response body: ' . $response);
-
         if ($error) {
             error_log('Twilio cURL error: ' . $error);
             return false;
         }
 
         if ($httpCode >= 200 && $httpCode < 300) {
-            $responseData = json_decode($response, true);
-            error_log('Twilio SMS sent successfully. SID: ' . ($responseData['sid'] ?? 'unknown'));
             return true;
         }
 

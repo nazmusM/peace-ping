@@ -117,13 +117,18 @@ header('X-XSS-Protection: 1; mode=block');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
 
-// Session security configuration
+// Session configuration - persistent across browser closes (30 days)
 if (session_status() === PHP_SESSION_NONE) {
     ini_set('session.cookie_httponly', 1);
-    ini_set('session.cookie_secure', 0);  // Set to 1 if using HTTPS
+    ini_set('session.cookie_secure', 0);
     ini_set('session.use_strict_mode', 1);
-    ini_set('session.cookie_samesite', 'Strict');
+    ini_set('session.cookie_samesite', 'Lax');
+    ini_set('session.cookie_lifetime', 2592000);
+    ini_set('session.gc_maxlifetime', 2592000);
 }
+
+// Ensure required tables exist
+ensureLoginAttemptsTable($db);
 
 // Page content functions
 function renderPage(string $title, string $content, string $page = 'home'): void
@@ -207,6 +212,16 @@ function renderPage(string $title, string $content, string $page = 'home'): void
         <footer class="footer">
                 <p>&copy; <?php echo date('Y') ?> Peace Ping. Reconnecting people thoughtfully.</p>
         </footer>
+        <!-- Cookie consent banner -->
+        <div id="cookie-banner" class="cookie-banner" role="dialog" aria-label="Cookie consent">
+            <div class="cookie-banner-content">
+                <div class="cookie-banner-text">
+                    <strong>🍪 We use cookies</strong>
+                    <p>We store a session cookie to keep you logged in and a preference cookie to remember your phone number. No tracking or analytics cookies are used.</p>
+                </div>
+                <button id="cookie-accept" class="btn btn-sm">Accept</button>
+            </div>
+        </div>
         <!-- Modal -->
         <div id="app-modal" class="modal-overlay">
             <div class="modal-card" role="dialog" aria-modal="true">
@@ -231,6 +246,22 @@ function renderPage(string $title, string $content, string $page = 'home'): void
             function closeModal() {
                 modal.classList.remove('open');
             }
+
+            // Password show/hide toggle
+            document.addEventListener('click', function(e) {
+                var toggle = e.target.closest('.password-toggle');
+                if (!toggle) return;
+                var targetId = toggle.getAttribute('data-target');
+                var input = document.getElementById(targetId);
+                if (!input) return;
+                var isPassword = input.type === 'password';
+                input.type = isPassword ? 'text' : 'password';
+                var eye = toggle.querySelector('.eye-icon');
+                var eyeSlash = toggle.querySelector('.eye-slash-icon');
+                if (eye) eye.style.display = isPassword ? 'none' : '';
+                if (eyeSlash) eyeSlash.style.display = isPassword ? '' : 'none';
+                toggle.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+            });
 
             async function showConfirm(title, message) {
                 return new Promise((resolve) => {
@@ -301,9 +332,27 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                             action: 'logout'
                         })
                     });
+                    document.cookie = 'remembered_phone=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/';
                     window.location.href = '/';
                 });
             <?php endif; ?>
+
+            // Cookie consent banner
+            (function () {
+                var banner = document.getElementById('cookie-banner');
+                var acceptBtn = document.getElementById('cookie-accept');
+                if (!banner || !acceptBtn) return;
+                if (document.cookie.split('; ').some(function (c) { return c.indexOf('cookie_consent=') === 0; })) {
+                    return;
+                }
+                banner.classList.add('cookie-banner-visible');
+                acceptBtn.addEventListener('click', function () {
+                    var d = new Date();
+                    d.setTime(d.getTime() + 365 * 86400000);
+                    document.cookie = 'cookie_consent=accepted;expires=' + d.toUTCString() + ';path=/;SameSite=Lax';
+                    banner.classList.remove('cookie-banner-visible');
+                });
+            })();
         </script>
     </body>
 
@@ -373,7 +422,7 @@ function getDashboardSummary(mysqli $db, int $userId): array
         $created = new DateTime((string) $row['created_at']);
         $expires = (clone $created)->modify('+30 days');
         $now = new DateTime();
-        $daysLeft = $now > $expires ? 0 : max(1, (int) $now->diff($expires)->format('%a') + 1);
+        $daysLeft = $now > $expires ? 0 : min(30, max(1, (int) $now->diff($expires)->format('%a') + 1));
         $row['days_until_expiry'] = $daysLeft;
         $pings[] = $row;
     }
@@ -397,6 +446,30 @@ function ensurePingDashboardColumns(mysqli $db): void
 {
     ensureColumnExists($db, 'pings', 'target_masked', "ALTER TABLE pings ADD COLUMN target_masked VARCHAR(40) NULL AFTER fingerprint_target");
     ensureColumnExists($db, 'pings', 'recipient_name', "ALTER TABLE pings ADD COLUMN recipient_name VARCHAR(120) NULL AFTER target_masked");
+}
+
+function ensureLoginAttemptsTable(mysqli $db): void
+{
+    $dbName = $db->query('SELECT DATABASE() AS db')->fetch_assoc()['db'] ?? '';
+    $stmt = $db->prepare(
+        "SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'login_attempts'"
+    );
+    $stmt->bind_param('s', $dbName);
+    $stmt->execute();
+    $exists = ((int) $stmt->get_result()->fetch_assoc()['cnt']) > 0;
+    $stmt->close();
+
+    if (!$exists) {
+        $db->query("
+            CREATE TABLE login_attempts (
+                id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                contact_hash CHAR(64) NOT NULL,
+                attempted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_login_attempts_hash (contact_hash),
+                INDEX idx_login_attempts_time (attempted_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
 }
 
 function ensureColumnExists(mysqli $db, string $table, string $column, string $alterSql): void
@@ -640,7 +713,13 @@ if ($path === '/register') {
                     </div>
                     <div class="form-group">
                         <label for="register-password">Password</label>
-                        <input type="password" id="register-password" name="password" placeholder="Create a password" autocomplete="new-password" required minlength="8">
+                        <div class="password-wrapper">
+                            <input type="password" id="register-password" name="password" placeholder="Create a password" autocomplete="new-password" required minlength="8">
+                            <button type="button" class="password-toggle" data-target="register-password" aria-label="Show password">
+                                <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/></svg>
+                                <svg class="eye-slash-icon" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/></svg>
+                            </button>
+                        </div>
                         <small>Password must be at least 8 characters long and include at least one uppercase letter and one number.</small>
                     </div>
                     <div class="password-strength">
@@ -652,7 +731,13 @@ if ($path === '/register') {
                     </div>
                     <div class="form-group">
                         <label for="register-password-confirm">Confirm Password</label>
-                        <input type="password" id="register-password-confirm" name="confirm_password" placeholder="Re-enter your password" autocomplete="new-password" required minlength="8">
+                        <div class="password-wrapper">
+                            <input type="password" id="register-password-confirm" name="confirm_password" placeholder="Re-enter your password" autocomplete="new-password" required minlength="8">
+                            <button type="button" class="password-toggle" data-target="register-password-confirm" aria-label="Show password">
+                                <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/></svg>
+                                <svg class="eye-slash-icon" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/></svg>
+                            </button>
+                        </div>
                         <p class="field-error" id="register-password-confirm-error" aria-live="polite"></p>
                     </div>
                     <button type="submit" class="btn">Send Verification Code</button>
@@ -942,14 +1027,28 @@ if ($path === '/login') {
             <article class="card">
                 <h2>Log In</h2>
                 <form id="login-form">
-                    <div class="form-group">
+                    <div class="form-group" id="phone-remembered-group" style="display:none">
+                        <label>Mobile Number</label>
+                        <p class="remembered-phone-text" id="phone-display"></p>
+                        <small>Not you? <a href="#" id="clear-remembered-phone">Use a different number</a></small>
+                    </div>
+                    <div class="form-group" id="phone-input-group">
                         <label for="login-phone">Mobile Number</label>
                         <input type="tel" id="login-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
                         <small>Enter the mobile number you used when registering.</small>
                     </div>
                     <div class="form-group">
                         <label for="login-password">Password</label>
-                        <input type="password" id="login-password" name="password" placeholder="Enter your password" autocomplete="current-password" required>
+                        <div class="password-wrapper">
+                            <input type="password" id="login-password" name="password" placeholder="Enter your password" autocomplete="current-password" required>
+                            <button type="button" class="password-toggle" data-target="login-password" aria-label="Show password">
+                                <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/></svg>
+                                <svg class="eye-slash-icon" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="forgot-link">
+                        <a href="/forgot-password">Forgot password?</a>
                     </div>
                     <button type="submit" class="btn">Log In</button>
                 </form>
@@ -1002,13 +1101,58 @@ if ($path === '/login') {
             });
         }
 
+        function getCookie(name) {
+            const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+            return match ? decodeURIComponent(match[2]) : null;
+        }
+
+        function setCookie(name, value, days) {
+            const d = new Date();
+            d.setTime(d.getTime() + days * 86400000);
+            document.cookie = name + '=' + encodeURIComponent(value) + ';expires=' + d.toUTCString() + ';path=/;SameSite=Lax';
+        }
+
+        function eraseCookie(name) {
+            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/';
+        }
+
         const loginForm = document.getElementById('login-form');
         const loginResult = document.getElementById('login-result');
+        const phoneInputGroup = document.getElementById('phone-input-group');
+        const phoneRememberedGroup = document.getElementById('phone-remembered-group');
+        const phoneDisplay = document.getElementById('phone-display');
+        const clearPhoneLink = document.getElementById('clear-remembered-phone');
+
+        const savedPhone = getCookie('remembered_phone');
+
+        function showPhoneInput() {
+            phoneRememberedGroup.style.display = 'none';
+            phoneInputGroup.style.display = 'block';
+            document.getElementById('login-phone').value = '';
+        }
+
+        function showRememberedPhone(phone) {
+            phoneDisplay.textContent = phone;
+            phoneRememberedGroup.style.display = 'block';
+            phoneInputGroup.style.display = 'none';
+        }
+
+        if (savedPhone) {
+            showRememberedPhone(savedPhone);
+        }
+
+        clearPhoneLink.addEventListener('click', function (e) {
+            e.preventDefault();
+            eraseCookie('remembered_phone');
+            showPhoneInput();
+            document.getElementById('login-phone').focus();
+        });
 
         loginForm.addEventListener('submit', async (event) => {
             event.preventDefault();
 
-            const phone = document.getElementById('login-phone').value.trim();
+            const phoneInput = document.getElementById('login-phone');
+            const phone = savedPhone || phoneInput.value.trim();
             const password = document.getElementById('login-password').value;
 
             if (!phone) {
@@ -1024,14 +1168,17 @@ if ($path === '/login') {
             showResult(loginResult, 'Logging in...', null);
             const response = await postJson('/api/register', {
                 action: 'login',
-                phone,
-                password
+                phone: phone,
+                password: password
             });
 
             if (!response.ok) {
                 showResult(loginResult, response.body.error || 'Login failed.', 'warn');
                 return;
             }
+
+            // Always save phone on successful login
+            setCookie('remembered_phone', phone, 365);
 
             showResult(loginResult, response.body.message, 'ok');
             window.location.href = '/dashboard';
@@ -1040,6 +1187,287 @@ if ($path === '/login') {
 <?php
     $content = ob_get_clean();
     renderPage('Login', $content, 'login');
+    exit;
+}
+
+// Forgot Password page
+if ($path === '/forgot-password') {
+    ob_start();
+?>
+    <div class="forgot-page">
+        <div class="page-header">
+            <h1>Reset Your Password</h1>
+            <p>Enter your mobile number to receive a verification code.</p>
+        </div>
+
+        <section class="card forgot-card">
+            <h2>📱 Verify Your Identity</h2>
+            <form id="forgot-form">
+                <div class="form-group">
+                    <label for="forgot-phone">Mobile Number</label>
+                    <input type="tel" id="forgot-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
+                    <small>Enter the mobile number you used when registering.</small>
+                </div>
+                <button type="submit" class="btn">Send Verification Code</button>
+            </form>
+            <p id="forgot-result" class="result" aria-live="polite"></p>
+
+            <form id="forgot-verify-form" style="display: none;">
+                <div class="form-group">
+                    <label for="forgot-code">Verification Code</label>
+                    <input id="forgot-code" name="code" type="text" required placeholder="123456" maxlength="6" inputmode="numeric">
+                </div>
+                <button type="submit" class="btn">Verify Code</button>
+                <p class="resend-note" id="forgot-resend-note" style="display:none;">You can request a new code if needed.</p>
+                <button type="button" class="btn btn-secondary" id="forgot-resend-btn" style="display:none;">Resend Code</button>
+            </form>
+            <p id="forgot-verify-result" class="result" aria-live="polite"></p>
+            <p class="forgot-back-link"><a href="/login">Back to Login</a></p>
+        </section>
+    </div>
+
+    <script>
+        async function postJson(url, payload) {
+            const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+            const body = await response.json().catch(() => ({}));
+            return { ok: response.ok, status: response.status, body };
+        }
+        function showResult(target, text, tone) {
+            if (!text || text.trim() === '') { target.style.display = 'none'; return; }
+            target.style.display = 'block';
+            target.textContent = text;
+            target.classList.remove("ok", "warn");
+            if (tone) target.classList.add(tone);
+            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        const forgotForm = document.getElementById('forgot-form');
+        const forgotVerifyForm = document.getElementById('forgot-verify-form');
+        const forgotResult = document.getElementById('forgot-result');
+        const forgotVerifyResult = document.getElementById('forgot-verify-result');
+        const forgotResendBtn = document.getElementById('forgot-resend-btn');
+        const forgotResendNote = document.getElementById('forgot-resend-note');
+        let resendCount = 0;
+        let verifiedPhone = '';
+
+        forgotForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const phone = document.getElementById('forgot-phone').value.trim();
+            if (!phone) {
+                showResult(forgotResult, 'Please enter your mobile number.', 'warn');
+                return;
+            }
+            showResult(forgotResult, 'Sending verification code...', null);
+            const res = await postJson('api/register', { action: 'send_reset_otp', phone });
+            if (!res.ok) {
+                showResult(forgotResult, res.body.error || 'Failed to send code.', 'warn');
+                return;
+            }
+            verifiedPhone = phone;
+            showResult(forgotResult, res.body.message, 'ok');
+            forgotForm.style.display = 'none';
+            forgotVerifyForm.style.display = 'block';
+            resendCount = 0;
+            forgotResendBtn.style.display = 'none';
+            forgotResendNote.style.display = 'none';
+        });
+
+        forgotResendBtn.addEventListener('click', async () => {
+            if (resendCount >= 2) {
+                showResult(forgotVerifyResult, 'Maximum resend attempts reached. Please start again.', 'warn');
+                forgotResendBtn.style.display = 'none';
+                return;
+            }
+            forgotResendBtn.disabled = true;
+            const res = await postJson('api/register', { action: 'send_reset_otp', phone: verifiedPhone });
+            if (res.ok) {
+                resendCount++;
+                showResult(forgotVerifyResult, 'New code sent.', 'ok');
+                if (resendCount >= 2) {
+                    forgotResendBtn.style.display = 'none';
+                }
+            } else {
+                showResult(forgotVerifyResult, res.body.error || 'Failed to resend code.', 'warn');
+            }
+            forgotResendBtn.disabled = false;
+        });
+
+        forgotVerifyForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('forgot-code').value.trim();
+            if (!code) {
+                showResult(forgotVerifyResult, 'Please enter the verification code.', 'warn');
+                return;
+            }
+            showResult(forgotVerifyResult, 'Verifying...', null);
+            const res = await postJson('api/register', { action: 'verify_reset_otp', phone: verifiedPhone, code });
+            if (!res.ok) {
+                showResult(forgotVerifyResult, res.body.error || 'Invalid code.', 'warn');
+                if (resendCount < 2) {
+                    forgotResendBtn.style.display = 'inline-block';
+                    forgotResendNote.style.display = 'block';
+                }
+                return;
+            }
+            showResult(forgotVerifyResult, 'Verified! Redirecting...', 'ok');
+            setTimeout(() => {
+                window.location.href = '/reset-password?phone=' + encodeURIComponent(verifiedPhone);
+            }, 800);
+        });
+    </script>
+<?php
+    $content = ob_get_clean();
+    renderPage('Forgot Password', $content, 'forgot-password');
+    exit;
+}
+
+// Reset Password page
+if ($path === '/reset-password') {
+    $phone = $_GET['phone'] ?? '';
+    if ($phone === '') {
+        header('Location: /forgot-password');
+        exit;
+    }
+
+    ob_start();
+?>
+    <div class="reset-page">
+        <div class="page-header">
+            <h1>Create New Password</h1>
+            <p>Choose a new password for your account.</p>
+        </div>
+
+        <section class="card reset-card">
+            <h2>🔐 New Password</h2>
+            <form id="reset-form">
+                <div class="form-group">
+                    <label for="reset-password">New Password</label>
+                    <div class="password-wrapper">
+                        <input type="password" id="reset-password" name="password" placeholder="Create a new password" autocomplete="new-password" required minlength="8">
+                        <button type="button" class="password-toggle" data-target="reset-password" aria-label="Show password">
+                            <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/></svg>
+                            <svg class="eye-slash-icon" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/></svg>
+                            </button>
+                        </div>
+                    <small>Password must be at least 8 characters long and include at least one uppercase letter and one number.</small>
+                </div>
+                <div class="password-strength">
+                    <div class="strength-label">Password strength</div>
+                    <div class="strength-bar">
+                        <span id="reset-password-strength-fill"></span>
+                    </div>
+                    <div id="reset-password-strength-text" class="strength-text">Minimum 8 characters, one capital letter, and one number.</div>
+                </div>
+                <div class="form-group">
+                    <label for="reset-password-confirm">Confirm New Password</label>
+                    <div class="password-wrapper">
+                        <input type="password" id="reset-password-confirm" name="confirm_password" placeholder="Re-enter your new password" autocomplete="new-password" required minlength="8">
+                        <button type="button" class="password-toggle" data-target="reset-password-confirm" aria-label="Show password">
+                            <svg class="eye-icon" viewBox="0 0 24 24" width="20" height="20"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/></svg>
+                            <svg class="eye-slash-icon" viewBox="0 0 24 24" width="20" height="20" style="display:none"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z" fill="currentColor"/></svg>
+                            </button>
+                        </div>
+                    <p class="field-error" id="reset-password-confirm-error" aria-live="polite"></p>
+                </div>
+                <button type="submit" class="btn">Reset Password</button>
+            </form>
+            <p id="reset-result" class="result" aria-live="polite"></p>
+            <p class="forgot-back-link"><a href="/login">Back to Login</a></p>
+        </section>
+    </div>
+
+    <script>
+        async function postJson(url, payload) {
+            const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+            const body = await response.json().catch(() => ({}));
+            return { ok: response.ok, status: response.status, body };
+        }
+        function showResult(target, text, tone) {
+            if (!text || text.trim() === '') { target.style.display = 'none'; return; }
+            target.style.display = 'block';
+            target.textContent = text;
+            target.classList.remove("ok", "warn");
+            if (tone) target.classList.add(tone);
+            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        const resetForm = document.getElementById('reset-form');
+        const resetResult = document.getElementById('reset-result');
+        const resetPassword = document.getElementById('reset-password');
+        const resetPasswordConfirm = document.getElementById('reset-password-confirm');
+        const resetPassConfirmError = document.getElementById('reset-password-confirm-error');
+        const resetStrengthFill = document.getElementById('reset-password-strength-fill');
+        const resetStrengthText = document.getElementById('reset-password-strength-text');
+
+        const getPasswordStrengthScore = (password) => {
+            let score = 0;
+            if (password.length >= 8) score += 1;
+            if (/[A-Z]/.test(password)) score += 1;
+            if (/[0-9]/.test(password)) score += 1;
+            if (/[^A-Za-z0-9]/.test(password)) score += 1;
+            return score;
+        };
+
+        const getStrengthLabel = (score) => {
+            if (score <= 1) return 'Weak';
+            if (score === 2) return 'Fair';
+            if (score === 3) return 'Good';
+            return 'Strong';
+        };
+
+        const updateResetStrength = () => {
+            const password = resetPassword.value;
+            const score = getPasswordStrengthScore(password);
+            const label = getStrengthLabel(score);
+            const width = (score / 4) * 100;
+            if (resetStrengthFill) {
+                resetStrengthFill.style.width = width + '%';
+                resetStrengthFill.className = '';
+                resetStrengthFill.classList.add(label.toLowerCase());
+            }
+            if (resetStrengthText) {
+                resetStrengthText.textContent = label + ' password.';
+            }
+        };
+
+        const updateResetValidation = () => {
+            const pw = resetPassword.value;
+            const cpw = resetPasswordConfirm.value;
+            let err = '';
+            if (pw && cpw && pw !== cpw) {
+                err = 'The passwords do not match.';
+            }
+            if (resetPassConfirmError) resetPassConfirmError.textContent = err;
+        };
+
+        resetPassword.addEventListener('input', () => { updateResetStrength(); updateResetValidation(); });
+        resetPasswordConfirm.addEventListener('input', updateResetValidation);
+
+        resetForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const phone = new URLSearchParams(window.location.search).get('phone') || '';
+            const password = resetPassword.value;
+            const confirmPassword = resetPasswordConfirm.value;
+
+            if (!password) { showResult(resetResult, 'Please enter a new password.', 'warn'); return; }
+            if (password.length < 8) { showResult(resetResult, 'Password must be at least 8 characters.', 'warn'); return; }
+            if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) { showResult(resetResult, 'Password must contain an uppercase letter and a number.', 'warn'); return; }
+            if (!confirmPassword) { showResult(resetResult, 'Please confirm your password.', 'warn'); return; }
+            if (password !== confirmPassword) { showResult(resetResult, 'Passwords do not match.', 'warn'); return; }
+
+            showResult(resetResult, 'Resetting password...', null);
+            const res = await postJson('api/register', { action: 'reset_password', phone, password, confirm_password: confirmPassword });
+            if (!res.ok) {
+                showResult(resetResult, res.body.error || 'Failed to reset password.', 'warn');
+                return;
+            }
+            showResult(resetResult, 'Password reset successfully! Redirecting to login...', 'ok');
+            setTimeout(() => { window.location.href = '/login'; }, 1200);
+        });
+    </script>
+<?php
+    $content = ob_get_clean();
+    renderPage('Reset Password', $content, 'reset-password');
     exit;
 }
 

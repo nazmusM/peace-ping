@@ -103,10 +103,15 @@ class UserService
             throw new InvalidArgumentException($this->getPhoneFormatGuidance());
         }
 
+        if ($this->isLoginThrottled($phone)) {
+            throw new InvalidArgumentException('Too many login attempts. Please try again in 15 minutes.');
+        }
+
         $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
         $existingUser = $this->getUserByContactHash($contactHash);
 
         if ($existingUser === null) {
+            $this->recordLoginAttempt($phone, false);
             throw new InvalidArgumentException('No account was found for that mobile number. Please register first.');
         }
 
@@ -114,7 +119,6 @@ class UserService
             throw new InvalidArgumentException('Your account is not verified. Please register again.');
         }
 
-        // Check if user has a password
         $select = $this->db->prepare(
             'SELECT id, name, password_hash FROM users WHERE id = ? LIMIT 1'
         );
@@ -124,20 +128,23 @@ class UserService
         $select->close();
 
         if ($user === null || $user['password_hash'] === null) {
+            $this->recordLoginAttempt($phone, false);
             throw new InvalidArgumentException('This account does not have a password set. Please register again to set a password.');
         }
 
-        // Verify password
         if (!password_verify($password, $user['password_hash'])) {
+            $this->recordLoginAttempt($phone, false);
             throw new InvalidArgumentException('Invalid password. Please try again.');
         }
 
-        // Log user in directly without OTP
+        $this->recordLoginAttempt($phone, true);
+
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }
         $_SESSION['user_id'] = $user['id'];
         $_SESSION['user_name'] = $user['name'];
+        $_SESSION['login_time'] = time();
         unset($_SESSION['pending_verification_user_id']);
 
         return [
@@ -328,6 +335,218 @@ class UserService
             return $this->encryption->decrypt($user['contact_encrypted']);
         } catch (\Exception $e) {
             return null;
+        }
+    }
+
+    public function sendResetOtp(string $phone): array
+    {
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
+        if (!$this->fingerprint->validateIdentifier($normalizedPhone)) {
+            throw new InvalidArgumentException($this->getPhoneFormatGuidance());
+        }
+
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+        $user = $this->getUserByContactHash($contactHash);
+
+        if ($user === null) {
+            throw new InvalidArgumentException('No account found for that mobile number.');
+        }
+
+        if ((int) $user['is_verified'] !== 1) {
+            throw new InvalidArgumentException('This account is not yet verified. Please register first.');
+        }
+
+        $this->ensureResetPasswordColumns();
+
+        $stmt = $this->db->prepare('SELECT reset_otp_attempts FROM users WHERE id = ? LIMIT 1');
+        $stmt->bind_param('i', $user['id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        $attempts = (int) ($row['reset_otp_attempts'] ?? 0);
+        if ($attempts >= 3) {
+            throw new InvalidArgumentException('Too many OTP requests. Please try again later.');
+        }
+
+        $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $expiresAt = date('Y-m-d H:i:s', time() + 600);
+
+        $update = $this->db->prepare(
+            'UPDATE users SET reset_otp = ?, reset_otp_expires_at = ?, reset_otp_attempts = reset_otp_attempts + 1 WHERE id = ?'
+        );
+        $update->bind_param('ssi', $code, $expiresAt, $user['id']);
+        $update->execute();
+        $update->close();
+
+        $this->notificationService->sendVerificationCode($normalizedPhone, $code);
+
+        return [
+            'message' => 'A verification code has been sent to your mobile number.',
+            'user_id' => (int) $user['id'],
+        ];
+    }
+
+    public function verifyResetOtp(string $phone, string $code): array
+    {
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+        $user = $this->getUserByContactHash($contactHash);
+
+        if ($user === null) {
+            throw new InvalidArgumentException('No account found for that mobile number.');
+        }
+
+        $this->ensureResetPasswordColumns();
+
+        $stmt = $this->db->prepare(
+            'SELECT reset_otp, reset_otp_expires_at FROM users WHERE id = ? LIMIT 1'
+        );
+        $stmt->bind_param('i', $user['id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if ($row === null || $row['reset_otp'] === null) {
+            throw new InvalidArgumentException('No verification code has been sent. Please request one first.');
+        }
+
+        if (strtotime((string) $row['reset_otp_expires_at']) < time()) {
+            throw new InvalidArgumentException('Verification code has expired. Please request a new one.');
+        }
+
+        if ((string) $row['reset_otp'] !== $code) {
+            throw new InvalidArgumentException('Invalid verification code. Please try again.');
+        }
+
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $_SESSION['reset_verified_user_id'] = (int) $user['id'];
+
+        $clear = $this->db->prepare('UPDATE users SET reset_otp = NULL, reset_otp_expires_at = NULL WHERE id = ?');
+        $clear->bind_param('i', $user['id']);
+        $clear->execute();
+        $clear->close();
+
+        return [
+            'success' => true,
+            'message' => 'Verified successfully. You can now reset your password.',
+        ];
+    }
+
+    public function resetPassword(string $phone, string $password, string $confirmPassword): array
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $verifiedUserId = $_SESSION['reset_verified_user_id'] ?? null;
+        if ($verifiedUserId === null) {
+            throw new InvalidArgumentException('Session expired. Please verify your identity again.');
+        }
+
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+        $user = $this->getUserByContactHash($contactHash);
+
+        if ($user === null || (int) $user['id'] !== $verifiedUserId) {
+            unset($_SESSION['reset_verified_user_id']);
+            throw new InvalidArgumentException('Session mismatch. Please start the process again.');
+        }
+
+        if ($password === '') {
+            throw new InvalidArgumentException('Password is required.');
+        }
+
+        if ($confirmPassword === '') {
+            throw new InvalidArgumentException('Please confirm your password.');
+        }
+
+        if ($password !== $confirmPassword) {
+            throw new InvalidArgumentException('The passwords do not match.');
+        }
+
+        if (strlen($password) < 8) {
+            throw new InvalidArgumentException('Password must be at least 8 characters long.');
+        }
+
+        if (!preg_match('/[A-Z]/', $password) || !preg_match('/[0-9]/', $password)) {
+            throw new InvalidArgumentException('Password must contain at least one uppercase letter and one number.');
+        }
+
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+
+        $update = $this->db->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+        $update->bind_param('si', $passwordHash, $verifiedUserId);
+        $update->execute();
+        $update->close();
+
+        unset($_SESSION['reset_verified_user_id']);
+
+        return [
+            'success' => true,
+            'message' => 'Password has been reset successfully. You can now log in with your new password.',
+        ];
+    }
+
+    public function isLoginThrottled(string $phone): bool
+    {
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) AS count FROM login_attempts
+             WHERE contact_hash = ? AND attempted_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)'
+        );
+        $stmt->bind_param('s', $contactHash);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return (int) ($row['count'] ?? 0) >= 5;
+    }
+
+    public function recordLoginAttempt(string $phone, bool $success): void
+    {
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+
+        if ($success) {
+            $delete = $this->db->prepare('DELETE FROM login_attempts WHERE contact_hash = ?');
+            $delete->bind_param('s', $contactHash);
+            $delete->execute();
+            $delete->close();
+        } else {
+            $insert = $this->db->prepare(
+                'INSERT INTO login_attempts (contact_hash, attempted_at) VALUES (?, NOW())'
+            );
+            $insert->bind_param('s', $contactHash);
+            $insert->execute();
+            $insert->close();
+        }
+    }
+
+    private function ensureResetPasswordColumns(): void
+    {
+        $this->ensureColumn('users', 'reset_otp', "ALTER TABLE users ADD COLUMN reset_otp VARCHAR(6) NULL AFTER verification_expires_at");
+        $this->ensureColumn('users', 'reset_otp_expires_at', "ALTER TABLE users ADD COLUMN reset_otp_expires_at TIMESTAMP NULL AFTER reset_otp");
+        $this->ensureColumn('users', 'reset_otp_attempts', "ALTER TABLE users ADD COLUMN reset_otp_attempts INT NOT NULL DEFAULT 0 AFTER reset_otp_expires_at");
+    }
+
+    private function ensureColumn(string $table, string $column, string $alterSql): void
+    {
+        $columnEscaped = $this->db->real_escape_string($column);
+        $dbName = $this->db->query('SELECT DATABASE() AS db')->fetch_assoc()['db'] ?? '';
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) AS cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+        );
+        $stmt->bind_param('sss', $dbName, $table, $columnEscaped);
+        $stmt->execute();
+        $exists = ((int) $stmt->get_result()->fetch_assoc()['cnt']) > 0;
+        $stmt->close();
+
+        if (!$exists) {
+            $this->db->query($alterSql);
         }
     }
 
