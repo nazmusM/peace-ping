@@ -39,6 +39,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = $e->getMessage();
     }
 }
+
+// On GET, check if preference was already submitted to show proper message
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $token !== '') {
+    $tokenCheck = $db->prepare(
+        'SELECT mt.is_used, mt.expires_at FROM match_tokens mt WHERE mt.token = ? LIMIT 1'
+    );
+    $tokenCheck->bind_param('s', $token);
+    $tokenCheck->execute();
+    $tokenRow = $tokenCheck->get_result()->fetch_assoc();
+    $tokenCheck->close();
+
+    if ($tokenRow && (int) $tokenRow['is_used'] === 1) {
+        $success = 'Your preference has already been recorded. The final update will appear on your dashboard once both people have responded.';
+    } elseif ($tokenRow && strtotime((string) $tokenRow['expires_at']) <= time()) {
+        $error = 'This preference link has expired.';
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -172,25 +189,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <?php if ($success): ?>
             <div class="success-message">
-                <h3>✅ Thank You!</h3>
+                <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 12 11 15 16 9"/></svg> Thank You!</h3>
                 <p><?php echo htmlspecialchars($success); ?></p>
             </div>
         <?php endif; ?>
 
         <?php if ($error): ?>
             <div class="error-message">
-                <h3>❌ Error</h3>
+                <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg> Error</h3>
                 <p><?php echo htmlspecialchars($error); ?></p>
             </div>
         <?php endif; ?>
 
-        <?php if (!$success): ?>
+        <?php if (!$success && !$error): ?>
             <div class="form-container">
                 <form method="POST" id="preference-form">
                     <input type="hidden" name="token" value="<?php echo htmlspecialchars($token); ?>">
 
                     <div class="preference-card" data-preference="comfortable">
-                        <span class="preference-icon">🤝</span>
+                        <span class="preference-icon"><svg class="icon icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l-2 2c-1 1-1 2 0 3l2 2c1 1 2 1 3 0l2-2"/><path d="M18 15l2 2c1 1 1 2 0 3l-2 2c-1 1-2 1-3 0l-2-2"/><path d="M8 7l-3 3 5 5 3-3"/><path d="M16 7l3 3-5 5-3-3"/><path d="M12 4v3"/><path d="M9 7h6"/></svg></span>
                         <div class="preference-title">I'm comfortable reaching out</div>
                         <div class="preference-description">
                             I'm happy to make the first move and reconnect directly. I feel confident about reaching out to reestablish our connection.
@@ -198,7 +215,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
 
                     <div class="preference-card" data-preference="prefer_other">
-                        <span class="preference-icon">🙏</span>
+                        <span class="preference-icon"><svg class="icon icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21l-4-4c-2-2-3-5-1-8l2-2c1-1 2-1 3 0l2 2c2 3 1 6-1 8l-4 4"/><path d="M7 11l3 3"/><path d="M17 11l-3 3"/></svg></span>
                         <div class="preference-title">I prefer the other person to reach out first</div>
                         <div class="preference-description">
                             I'd be more comfortable if the other person initiates the reconnection. I'm open to reconnecting but prefer they take the lead.
@@ -206,7 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
 
                     <div class="preference-card" data-preference="either">
-                        <span class="preference-icon">🌟</span>
+                        <span class="preference-icon"><svg class="icon icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
                         <div class="preference-title">Either way is fine with me</div>
                         <div class="preference-description">
                             I'm comfortable either way - whether I reach out or they do. The important thing is that we reconnect, regardless of who initiates.
@@ -221,16 +238,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
 
         <div class="card" style="margin-top: var(--space-2xl);">
-            <h3>🔒 Your Privacy Matters</h3>
-            <p>Your preference is completely confidential and will only be used to determine the most appropriate way to facilitate your reconnection. The other person will not see your specific choice - they will only receive a neutral message based on both of your preferences.</p>
+            <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/></svg> Your Privacy Matters</h3>
+            <p>Your preference is completely private. It is only used to decide how Peace Ping describes your reconnection. The other person will never see your specific choice.</p>
 
             <div style="margin-top: var(--space-lg);">
                 <h4>What happens next?</h4>
                 <ul style="color: var(--muted); line-height: 1.8;">
                     <li>Both people share their preferences privately</li>
-                    <li>Our system determines the best approach based on both preferences</li>
-                    <li>You'll both receive a final message with guidance for reconnection</li>
-                    <li>The final message respects both people's comfort levels</li>
+                    <li>We decide the best approach based on what you both prefer</li>
+                    <li>You will both receive a final message with guidance for reconnection</li>
+                    <li>The final message respects what you both feel comfortable with</li>
                 </ul>
             </div>
         </div>

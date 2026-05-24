@@ -451,25 +451,54 @@ class PeacePingService
             return false;
         }
 
-        $hasMatch = $this->db->prepare(
-            'SELECT COUNT(*) as count FROM pings
-             WHERE fingerprint_self = ? AND fingerprint_target = ? AND user_id != ?'
-        );
-        $hasMatch->bind_param('ssi', $row['fingerprint_target'], $row['fingerprint_self'], $userId);
-        $hasMatch->execute();
-        $matchCount = (int) $hasMatch->get_result()->fetch_assoc()['count'];
-        $hasMatch->close();
+        $this->db->begin_transaction();
 
-        if ($matchCount > 0) {
+        try {
+            // Find any match linked to this ping's fingerprint pair
+            $findMatch = $this->db->prepare(
+                'SELECT id FROM matches
+                 WHERE (fingerprint_a = ? AND fingerprint_b = ?)
+                    OR (fingerprint_a = ? AND fingerprint_b = ?)
+                 LIMIT 1'
+            );
+            $findMatch->bind_param(
+                'ssss',
+                $row['fingerprint_self'], $row['fingerprint_target'],
+                $row['fingerprint_target'], $row['fingerprint_self']
+            );
+            $findMatch->execute();
+            $matchRow = $findMatch->get_result()->fetch_assoc();
+            $findMatch->close();
+
+            if ($matchRow) {
+                $matchId = (int) $matchRow['id'];
+                $deleteMp = $this->db->prepare('DELETE FROM match_preferences WHERE match_id = ?');
+                $deleteMp->bind_param('i', $matchId);
+                $deleteMp->execute();
+                $deleteMp->close();
+
+                $deleteMt = $this->db->prepare('DELETE FROM match_tokens WHERE match_id = ?');
+                $deleteMt->bind_param('i', $matchId);
+                $deleteMt->execute();
+                $deleteMt->close();
+
+                $deleteM = $this->db->prepare('DELETE FROM matches WHERE id = ?');
+                $deleteM->bind_param('i', $matchId);
+                $deleteM->execute();
+                $deleteM->close();
+            }
+
+            $deleteP = $this->db->prepare('DELETE FROM pings WHERE id = ? AND user_id = ?');
+            $deleteP->bind_param('ii', $pingId, $userId);
+            $deleted = $deleteP->execute();
+            $deleteP->close();
+
+            $this->db->commit();
+            return $deleted;
+        } catch (\Throwable $e) {
+            $this->db->rollback();
             return false;
         }
-
-        $delete = $this->db->prepare('DELETE FROM pings WHERE id = ? AND user_id = ?');
-        $delete->bind_param('ii', $pingId, $userId);
-        $deleted = $delete->execute();
-        $delete->close();
-
-        return $deleted;
     }
 
     private function resetMatch(int $matchId): void

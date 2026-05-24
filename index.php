@@ -216,7 +216,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
         <div id="cookie-banner" class="cookie-banner" role="dialog" aria-label="Cookie consent">
             <div class="cookie-banner-content">
                 <div class="cookie-banner-text">
-                    <strong>🍪 We use cookies</strong>
+                    <strong><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="9" cy="9" r="1" fill="currentColor"/><circle cx="15" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="14" r="1" fill="currentColor"/><circle cx="14" cy="15" r="1" fill="currentColor"/><circle cx="12" cy="13" r="1" fill="currentColor"/></svg> We use cookies</strong>
                     <p>We store a session cookie to keep you logged in and a preference cookie to remember your phone number. No tracking or analytics cookies are used.</p>
                 </div>
                 <button id="cookie-accept" class="btn btn-sm">Accept</button>
@@ -542,7 +542,7 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
         if ($deleted) {
             Response::json(['success' => true, 'message' => 'Peace Ping cancelled.']);
         } else {
-            Response::json(['error' => 'Could not cancel ping. It may already be matched or not found.'], 400);
+            Response::json(['error' => 'Could not delete ping. It may not exist or may not belong to you.'], 400);
         }
         exit;
     }
@@ -568,7 +568,7 @@ if ($path === '/' || $path === '/home') {
         <section class="hero">
             <div class="hero-content">
                 <p class="kicker">Peace Ping</p>
-                <h1>Mutual Reconnection, Without Pressure</h1>
+                <h1>Reconnect Without Pressure</h1>
                 <p>
                     Sometimes you want to reconnect, but you're not sure if the other person feels the same.
                     Peace Ping makes it safe - both people need to express interest before any contact happens.
@@ -584,16 +584,16 @@ if ($path === '/' || $path === '/home') {
             <h2>How Peace Ping Works</h2>
             <div class="feature-grid">
                 <div class="feature">
-                    <h3>🕊️ Anonymous Interest</h3>
+                    <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c-4 0-7 3-7 7v7l4-3c2 1 4 1 6 0l4 3v-7c0-4-3-7-7-7z"/><line x1="9" y1="10" x2="15" y2="10"/></svg> Private Interest</h3>
                     <p>Send a Peace Ping to someone you're thinking about. They won't know unless they also ping you back.</p>
                 </div>
                 <div class="feature">
-                    <h3>🤝 Mutual Connection</h3>
+                    <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l-2 2c-1 1-1 2 0 3l2 2c1 1 2 1 3 0l2-2"/><path d="M18 15l2 2c1 1 1 2 0 3l-2 2c-1 1-2 1-3 0l-2-2"/><path d="M8 7l-3 3 5 5 3-3"/><path d="M16 7l3 3-5 5-3-3"/><path d="M12 4v3"/><path d="M9 7h6"/></svg> Both Say Yes</h3>
                     <p>Only when both people ping each other does a connection happen. No awkward conversations!</p>
                 </div>
                 <div class="feature">
-                    <h3>🔒 Privacy First</h3>
-                    <p>Numbers used for matching are fingerprinted with a private server secret. Raw submitted target numbers are not stored.</p>
+                    <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/></svg> Privacy First</h3>
+                    <p>Phone numbers you enter to find someone are turned into secret codes and never saved.</p>
                 </div>
             </div>
         </section>
@@ -611,7 +611,7 @@ if ($path === '/how-it-works') {
     <div class="how-it-works">
         <div class="page-header">
             <h1>How Peace Ping Works</h1>
-            <p>Simple, thoughtful reconnection without the pressure of direct outreach.</p>
+            <p>Simple, thoughtful reconnection without the awkwardness of reaching out directly.</p>
         </div>
 
         <div class="steps-grid hiw-steps">
@@ -619,58 +619,58 @@ if ($path === '/how-it-works') {
                 <div class="step-number">1</div>
                 <div class="step-content">
                     <h3>Send Your Peace Ping</h3>
-                    <p>Think of someone you'd like to reconnect with and send them a Peace Ping using their contact information.</p>
+                    <p>Think of someone you'd like to reconnect with and send them a Peace Ping using their phone number.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-number">2</div>
                 <div class="step-content">
-                    <h3>Wait for Mutual Interest</h3>
-                    <p>If they also send you a Peace Ping, our system detects a mutual connection and notifies both of you.</p>
+                    <h3>Wait for a Match</h3>
+                    <p>If they also send you a Peace Ping, we let both of you know you have a match.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-number">3</div>
                 <div class="step-content">
                     <h3>Share Your Preferences</h3>
-                    <p>Both people receive private links to share their comfort level with reconnecting.</p>
+                    <p>Both people receive private links to say how comfortable they feel about reconnecting.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-number">4</div>
                 <div class="step-content">
                     <h3>Reconnect Thoughtfully</h3>
-                    <p>Based on both preferences, you'll receive guidance on the best way to reconnect.</p>
+                    <p>Based on what both people prefer, you'll get helpful guidance on how to reconnect.</p>
                 </div>
             </div>
         </div>
 
         <div class="privacy-simple">
-            <h2>🔒 Your Privacy Matters</h2>
+            <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/></svg> Your Privacy Matters</h2>
             <div class="privacy-grid">
                 <div class="privacy-item">
-                    <h3>Anonymous Matching</h3>
-                    <p>Phone numbers are converted into secure codes before any matching happens.</p>
+                    <h3>Private Matching</h3>
+                    <p>Phone numbers are turned into secret codes before any matching happens.</p>
                 </div>
                 <div class="privacy-item">
-                    <h3>No Storage of Numbers</h3>
-                    <p>The numbers you enter for matching are never stored in readable form.</p>
+                    <h3>Numbers Never Saved</h3>
+                    <p>The numbers you enter to find someone are turned into secret codes and never stored.</p>
                 </div>
                 <div class="privacy-item">
-                    <h3>Encrypted Account</h3>
-                    <p>Your own mobile number is encrypted and only used for SMS delivery.</p>
+                    <h3>Your Account is Locked</h3>
+                    <p>Your own mobile number is protected so only you can access your account. It is only used to send you SMS messages.</p>
                 </div>
                 <div class="privacy-item">
-                    <h3>Mutual Consent Only</h3>
-                    <p>No information is ever shared unless both people independently ping each other.</p>
+                    <h3>Both Agree or Nothing</h3>
+                    <p>Nobody is told you are interested unless they also send you a Peace Ping.</p>
                 </div>
                 <div class="privacy-item">
                     <h3>You Stay in Control</h3>
-                    <p>You decide if and when to reconnect, with guidance that respects both preferences.</p>
+                    <p>You decide if and when to reconnect. Your preferences are never shared with anyone.</p>
                 </div>
                 <div class="privacy-item">
                     <h3>No Unwanted Contact</h3>
-                    <p>We never share your contact details with anyone without your explicit consent.</p>
+                    <p>We never share your contact details with anyone without your permission.</p>
                 </div>
             </div>
         </div>
@@ -699,12 +699,12 @@ if ($path === '/register') {
 
         <section class="grid">
             <article class="card">
-                <h2>📱 Register Your Account</h2>
+                <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg> Register Your Account</h2>
                 <form id="register-form">
                     <div class="form-group">
                         <label for="register-phone">Mobile Number</label>
                         <input type="tel" id="register-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
-                        <small>Use a UK mobile such as 07xxx xxxxxx or +447xxx xxxxxx. International +[country code][number] also works. Spaces are fine.</small>
+                        <small>Use a UK mobile (07xxx xxxxxx) or international (+44123...). Spaces and dashes are fine - we fix the format for you.</small>
                     </div>
                     <div class="form-group">
                         <label for="register-phone-confirm">Confirm Mobile Number</label>
@@ -755,7 +755,7 @@ if ($path === '/register') {
             </article>
 
             <article class="card">
-                <h2>🔐 Already Registered?</h2>
+                <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/><path d="M17 4l-4 4"/><path d="M19 2l-2 2"/></svg> Already Registered?</h2>
                 <p>If you already have an account, log in with your mobile number and password.</p>
                 <div style="margin-top: var(--space-lg);">
                     <a href="/login" class="btn btn-secondary">Log In</a>
@@ -1201,7 +1201,7 @@ if ($path === '/forgot-password') {
         </div>
 
         <section class="card forgot-card">
-            <h2>📱 Verify Your Identity</h2>
+            <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg> Verify Your Identity</h2>
             <form id="forgot-form">
                 <div class="form-group">
                     <label for="forgot-phone">Mobile Number</label>
@@ -1338,7 +1338,7 @@ if ($path === '/reset-password') {
         </div>
 
         <section class="card reset-card">
-            <h2>🔐 New Password</h2>
+            <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/><path d="M17 4l-4 4"/><path d="M19 2l-2 2"/></svg> New Password</h2>
             <form id="reset-form">
                 <div class="form-group">
                     <label for="reset-password">New Password</label>
@@ -1490,7 +1490,7 @@ if ($path === '/ping') {
         <div class="ping-layout">
             <div class="ping-row-2col">
                 <article class="card">
-                    <h2>📤 Send Your Peace Ping</h2>
+                    <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Send Your Peace Ping</h2>
                     <form id="ping-form">
                         <div class="form-group">
                             <label for="recipient-name">Recipient Name (Optional)</label>
@@ -1499,7 +1499,7 @@ if ($path === '/ping') {
                         <div class="form-group">
                             <label for="ping-target">Mobile Number to Ping</label>
                             <input type="tel" id="ping-target" name="target" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
-                            <small>Use 07xxx xxxxxx, +447xxx xxxxxx, or international +[country code][number]. We auto-normalise spacing and common UK formats.</small>
+                            <small>Enter a UK mobile (07xxx xxxxxx) or international number (+44123...). We fix the format for you.</small>
                         </div>
                         <div class="form-group">
                             <label for="ping-target-confirm">Confirm Recipient Number</label>
@@ -1511,7 +1511,7 @@ if ($path === '/ping') {
                     <p id="ping-result" class="result" aria-live="polite"></p>
 
                     <div id="match-info" hidden>
-                        <h3>🎊 Match Found!</h3>
+                        <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2"/><path d="M12 21v2"/><path d="M4.22 4.22l1.42 1.42"/><path d="M18.36 18.36l1.42 1.42"/><path d="M1 12h2"/><path d="M21 12h2"/><path d="M4.22 19.78l1.42-1.42"/><path d="M18.36 5.64l1.42-1.42"/></svg> Match Found!</h3>
                         <p id="match-message"></p>
                         <div id="next-steps">
                             <h4>What happens next?</h4>
@@ -1521,46 +1521,45 @@ if ($path === '/ping') {
                 </article>
 
                 <article class="card">
-                    <h2>🔒 What We Store</h2>
-                    <p>We do not store readable versions of the numbers you submit for matching.</p>
-                    <p>Instead, they are immediately converted into secure anonymous codes. The codes still allow the system to detect mutual matches without revealing to us the actual phone numbers being entered.</p>
+                    <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/></svg> What We Store</h2>
+                    <p>The phone numbers you enter are never saved. They are turned into secret codes that can only be used to detect when two people both want to reconnect. Even we cannot see the original numbers.</p>
                     <ul class="trust-list">
-                        <li>No one is notified unless both people independently ping each other.</li>
-                        <li>No readable phone numbers are stored in the system after submission.</li>
+                        <li>No one is told you are interested unless they also send you a Peace Ping.</li>
+                        <li>Phone numbers you enter are turned into secret codes and never stored.</li>
                         <li>Your privacy is protected at every step.</li>
                     </ul>
                 </article>
             </div>
 
             <article class="card ping-how-full">
-                <h2>🤔 How It Works</h2>
+                <h2><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg> How It Works</h2>
                 <div class="steps-grid">
                     <div class="step">
                         <div class="step-number">1</div>
                         <div class="step-content">
                             <h3>Send Your Peace Ping</h3>
-                            <p>Think of someone you'd like to reconnect with and send them a Peace Ping using their contact information.</p>
+                            <p>Think of someone you'd like to reconnect with and send them a Peace Ping using their phone number.</p>
                         </div>
                     </div>
                     <div class="step">
                         <div class="step-number">2</div>
                         <div class="step-content">
-                            <h3>Wait for Mutual Interest</h3>
-                            <p>If they also send you a Peace Ping, our system detects a mutual connection and notifies both of you.</p>
+                            <h3>Wait for a Match</h3>
+                            <p>If they also send you a Peace Ping, we let you both know you have a match.</p>
                         </div>
                     </div>
                     <div class="step">
                         <div class="step-number">3</div>
                         <div class="step-content">
                             <h3>Share Your Preferences</h3>
-                            <p>Both people receive private links to share their comfort level with reconnecting.</p>
+                            <p>Both people receive private links to say how comfortable they feel about reconnecting.</p>
                         </div>
                     </div>
                     <div class="step">
                         <div class="step-number">4</div>
                         <div class="step-content">
                             <h3>Reconnect Thoughtfully</h3>
-                            <p>Based on both preferences, you'll receive guidance on the best way to reconnect.</p>
+                            <p>Based on what both people prefer, you will receive helpful guidance on how to reconnect.</p>
                         </div>
                     </div>
                 </div>
@@ -1622,7 +1621,7 @@ if ($path === '/dashboard') {
 
             <article class="card">
                 <h2>Privacy Reminder</h2>
-                <p>Target numbers are fingerprinted for matching and raw submitted numbers are not stored. The platform does not reveal interest unless both sides independently match.</p>
+                <p>Phone numbers you enter for matching are turned into secure codes and never saved. No one knows you are interested unless they also ping you back.</p>
             </article>
         </section>
 
@@ -1660,11 +1659,11 @@ if ($path === '/dashboard') {
                             <strong>Peace Ping to <?php echo htmlspecialchars($displayTarget); ?></strong>
                             <p>
                                 <?php if ($status === 'pending'): ?>
-                                    Waiting for mutual interest. No notification has been sent to the other person.
+                                    Waiting for a match. The other person has not been told you sent a Peace Ping.
                                 <?php elseif ($status === 'matched' && $token !== ''): ?>
-                                    Matched. Your private preference selection is ready.
+                                    Match found. Your private preference link is ready.
                                 <?php elseif ($status === 'matched'): ?>
-                                    Matched. Waiting for preference updates or final message.
+                                    Match found. Waiting for your preference or final message.
                                 <?php elseif ($finalMessage !== null): ?>
                                     <?php echo nl2br(htmlspecialchars($finalMessage)); ?>
                                 <?php else: ?>
@@ -1679,9 +1678,7 @@ if ($path === '/dashboard') {
                             <?php if ($token !== ''): ?>
                                 <a href="/preferences?token=<?php echo urlencode($token); ?>" class="btn btn-sm btn-secondary">Preferences</a>
                             <?php endif; ?>
-                            <?php if ($status === 'pending'): ?>
-                                <button type="button" class="btn btn-sm btn-danger btn-delete-ping" data-ping-id="<?php echo (int) $ping['id']; ?>">Cancel</button>
-                            <?php endif; ?>
+                            <button type="button" class="btn btn-sm btn-danger btn-delete-ping" data-ping-id="<?php echo (int) $ping['id']; ?>" data-status="<?php echo $status; ?>"><?php echo $status === 'pending' ? 'Cancel' : 'Delete'; ?></button>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -1693,10 +1690,14 @@ if ($path === '/dashboard') {
         document.querySelectorAll('.btn-delete-ping').forEach(btn => {
             btn.addEventListener('click', async function() {
                 const pingId = this.dataset.pingId;
+                const status = this.dataset.status;
+                const isMatched = status === 'matched' || status === 'completed';
 
                 const confirmed = await showConfirm(
-                    'Cancel Peace Ping?',
-                    'This will permanently remove this Peace Ping. The other person will never know you sent it. This cannot be undone.'
+                    isMatched ? 'Delete Peace Ping?' : 'Cancel Peace Ping?',
+                    isMatched
+                        ? 'This will permanently remove this Peace Ping and its match. This cannot be undone.'
+                        : 'This will permanently remove this Peace Ping. The other person will never know you sent it. This cannot be undone.'
                 );
                 if (!confirmed) return;
 
@@ -1714,7 +1715,7 @@ if ($path === '/dashboard') {
                     if (response.ok && data.success) {
                         this.closest('.ping-card').remove();
                     } else {
-                        await showAlert('Could Not Cancel', data.error || 'Could not cancel ping.');
+                        await showAlert('Could Not Delete', data.error || 'Could not delete ping.');
                         this.disabled = false;
                         this.textContent = 'Cancel';
                     }
@@ -1746,31 +1747,31 @@ if ($path === '/faq') {
         <section class="faq-list">
             <div class="faq-item">
                 <h3>Is my information secure?</h3>
-                <p>Yes. All contact information is encrypted. The numbers you enter for matching are immediately converted into secure anonymous codes, so no readable phone numbers are stored. Your information is only shared when there's mutual consent from both parties.</p>
+                <p>Yes. Your contact details are protected for safety. The numbers you enter to find someone are turned into secret codes right away, so even we never see the original numbers. Your information is only ever shared when both you and the other person both agree.</p>
             </div>
             <div class="faq-item">
                 <h3>What if the other person doesn't ping me back?</h3>
-                <p>Nothing happens. Your Peace Ping remains completely private, and no information is shared with anyone. The other person will never know you pinged them unless they also ping you.</p>
+                <p>Nothing happens. Your Peace Ping stays completely private, and nobody is told anything. The other person will never know you pinged them unless they also ping you.</p>
             </div>
             <div class="faq-item">
                 <h3>Can I delete my account?</h3>
-                <p>Yes. You can request deletion at any time and we will remove all your information from our system. Contact us through the Contact page to request account deletion.</p>
+                <p>Yes. You can ask us to delete your account at any time through the Contact page and we will remove all your information.</p>
             </div>
             <div class="faq-item">
                 <h3>How long does my Peace Ping stay active?</h3>
-                <p>Peace Pings remain active for 30 days. After that, they expire automatically and are removed from the system. You can always send a new Peace Ping at any time.</p>
+                <p>Peace Pings stay active for 30 days. If a match happens, the ping and its match stay for 30 days from the match date. After that, they are removed automatically. You can also delete any ping at any time from your Dashboard.</p>
             </div>
             <div class="faq-item">
-                <h3>Can I cancel a Peace Ping before it matches?</h3>
-                <p>Yes. If you have sent a Peace Ping that has not yet been reciprocated, you can cancel it from your Dashboard. Once a mutual match has been detected, cancellation is no longer possible.</p>
+                <h3>Can I cancel or delete a Peace Ping?</h3>
+                <p>Yes. You can cancel a pending Peace Ping or delete one that has already matched from your Dashboard at any time. Once deleted, the other person will never know you sent it.</p>
             </div>
             <div class="faq-item">
                 <h3>How does the matching process work?</h3>
-                <p>When you send a Peace Ping, your phone number and the recipient's number are converted into secure anonymous codes (fingerprints). The system checks if the recipient has also sent a Peace Ping with your number. If both of you have independently pinged each other, a mutual match is detected and both parties are notified.</p>
+                <p>When you send a Peace Ping, the phone number you enter is turned into a secret code right away. We then check if that person has also sent a Peace Ping with your number. If you have both pinged each other, a match is found and both of you are notified.</p>
             </div>
             <div class="faq-item">
                 <h3>What happens after a match is found?</h3>
-                <p>Both people receive private SMS links to share their reconnection preferences. Based on both preferences, the system provides guidance on how to reconnect. Your preferences remain private and are never shared with the other person.</p>
+                <p>Both people receive private SMS links to share their reconnection preferences. Based on what each person prefers, we provide helpful guidance on how to reconnect. Your preferences stay private and are never shared with anyone.</p>
             </div>
         </section>
     </div>
@@ -1795,17 +1796,17 @@ if ($path === '/contact') {
 
             <div class="contact-methods">
                 <div class="contact-method">
-                    <h3>💬 Support</h3>
+                    <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> Support</h3>
                     <p>Need help with a Peace Ping?</p>
                     <p>Check our <a href="/faq">FAQ</a> or <a href="/how-it-works">How It Works</a> page first</p>
                 </div>
                 <div class="contact-method">
-                    <h3>🔒 Privacy</h3>
+                    <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/></svg> Privacy</h3>
                     <p>Questions about privacy?</p>
                     <p>Your data security is our priority</p>
                 </div>
                 <div class="contact-method">
-                    <h3>📧 Technical Support</h3>
+                    <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="2 4 12 12 22 4"/></svg> Technical Support</h3>
                     <p>Having technical issues?</p>
                     <p>We're here to help resolve any problems you encounter.</p>
                 </div>
@@ -1828,21 +1829,9 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
     $error = '';
     $success = '';
     $finalUpdate = '';
-    $context = $token !== '' ? $peacePingService->getPreferenceContext($token) : null;
 
-    if ($token === '') {
-        $error = 'Missing preference token.';
-    } elseif ($context === null) {
-        $error = 'Invalid or expired link.';
-    } elseif ($context['is_completed'] && !empty($context['final_message'])) {
-        $finalUpdate = (string) $context['final_message'];
-    } elseif ($context['is_used'] || $context['has_preference']) {
-        $success = 'Your preference has already been recorded. The final update will appear here and on your dashboard once both people have responded.';
-    } elseif ($context['is_expired']) {
-        $error = 'This preference link has expired.';
-    }
-
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
+    // Handle POST first to avoid GET checks overriding on resubmit
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $token !== '') {
         $preference = $_POST['preference'] ?? '';
 
         try {
@@ -1856,6 +1845,27 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
         }
     }
 
+    // GET checks only if POST didn't already set a message
+    if ($success === '' && $error === '') {
+        $context = $token !== '' ? $peacePingService->getPreferenceContext($token) : null;
+
+        if ($token === '') {
+            $error = 'Missing preference token.';
+        } elseif ($context === null) {
+            $error = 'Invalid or expired link.';
+        } elseif ($context['is_completed'] && !empty($context['final_message'])) {
+            $finalUpdate = (string) $context['final_message'];
+        } elseif ($context['is_used'] || $context['has_preference']) {
+            $success = 'Your preference has already been recorded. The final update will appear here and on your dashboard once both people have responded.';
+        } elseif ($context['is_expired']) {
+            $error = 'This preference link has expired.';
+        }
+    }
+
+    // Ensure context is available for other_name fallback
+    if (!isset($context)) {
+        $context = $token !== '' ? $peacePingService->getPreferenceContext($token) : null;
+    }
     $matchedName = $context['other_name'] ?? 'the other person';
 
     ob_start();
@@ -1896,7 +1906,7 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
                         <span class="preference-icon">A</span>
                         <div class="preference-title">I'm comfortable reaching out</div>
                         <div class="preference-description">
-                            Your selection stays private. It is used only to choose the system wording sent to both people.
+                            Your choice is private. It is only used to pick the right wording for your reconnection message.
                         </div>
                     </div>
 
@@ -1904,7 +1914,7 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
                         <span class="preference-icon">B</span>
                         <div class="preference-title">I prefer the other person to reach out first</div>
                         <div class="preference-description">
-                            Your selection stays private. It is never shown to the other person and never used to assign responsibility.
+                            Your choice is private. It is never shown to the other person.
                         </div>
                     </div>
 
@@ -1912,7 +1922,7 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
                         <span class="preference-icon">C</span>
                         <div class="preference-title">Either is fine</div>
                         <div class="preference-description">
-                            Your selection stays private. The system uses it only to choose neutral wording for the final permission message.
+                            Your choice is private. It is only used to pick neutral wording for the final message.
                         </div>
                     </div>
 
@@ -1924,8 +1934,8 @@ if ($path === '/preferences' || strpos($path, '/preferences/') === 0) {
         <?php endif; ?>
 
         <div class="card" style="margin-top: var(--space-2xl);">
-            <h3>Your Privacy</h3>
-            <p>These selections are never shown to the other person, never used to assign responsibility, and used only to choose the system wording.</p>
+            <h3><svg class="icon icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><circle cx="12" cy="16" r="1.5"/><path d="M8 11V7a4 4 0 018 0v4"/></svg> Your Privacy</h3>
+            <p>Your choices are private and never shared with anyone. They are only used to guide how Peace Ping describes your reconnection.</p>
         </div>
     </div>
 

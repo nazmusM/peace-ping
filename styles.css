@@ -56,6 +56,27 @@
     /* 24px */
 }
 
+.icon {
+    vertical-align: middle;
+    margin-right: 0.25em;
+    flex-shrink: 0;
+}
+
+.icon-sm {
+    width: 18px;
+    height: 18px;
+}
+
+.icon-md {
+    width: 24px;
+    height: 24px;
+}
+
+.icon-lg {
+    width: 28px;
+    height: 28px;
+}
+
 * {
     margin: 0;
     padding: 0;
