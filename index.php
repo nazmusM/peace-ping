@@ -1129,7 +1129,7 @@ if ($path === '/login') {
         const phoneDisplay = document.getElementById('phone-display');
         const clearPhoneLink = document.getElementById('clear-remembered-phone');
 
-        const savedPhone = getCookie('remembered_phone');
+        let savedPhone = getCookie('remembered_phone');
 
         function showPhoneInput() {
             phoneRememberedGroup.style.display = 'none';
@@ -1149,6 +1149,7 @@ if ($path === '/login') {
 
         clearPhoneLink.addEventListener('click', function (e) {
             e.preventDefault();
+            savedPhone = null;
             eraseCookie('remembered_phone');
             showPhoneInput();
             document.getElementById('login-phone').focus();
@@ -1238,7 +1239,9 @@ if ($path === '/login') {
             var cookieVal = getCookie('login_lockout_end');
             if (cookieVal) {
                 var endTime = parseInt(cookieVal, 10);
-                if (!isNaN(endTime) && endTime > Date.now()) {
+                // Sanity check: ignore if >16 minutes ahead (corrupted cookie from old bug)
+                var maxValid = Date.now() + 16 * 60 * 1000;
+                if (!isNaN(endTime) && endTime > Date.now() && endTime <= maxValid) {
                     startLockoutCountdown(endTime);
                 } else {
                     eraseCookie('login_lockout_end');
@@ -1732,9 +1735,7 @@ if ($path === '/dashboard') {
                                     Completed. Check your latest SMS or final update.
                                 <?php endif; ?>
                             </p>
-                            <?php if ($status === 'pending' || $status === 'matched'): ?>
-                                <small class="expiry-note">Expires in <?php echo $daysLeft; ?> day<?php echo $daysLeft !== 1 ? 's' : ''; ?></small>
-                            <?php endif; ?>
+                            <small class="expiry-note">Expires in <?php echo $daysLeft; ?> day<?php echo $daysLeft !== 1 ? 's' : ''; ?></small>
                         </div>
                         <div class="ping-actions">
                             <?php if ($token !== ''): ?>
@@ -1758,7 +1759,7 @@ if ($path === '/dashboard') {
                 const confirmed = await showConfirm(
                     isMatched ? 'Delete Peace Ping?' : 'Cancel Peace Ping?',
                     isMatched
-                        ? 'This will permanently remove this Peace Ping and its match. This cannot be undone.'
+                        ? 'This will remove this Ping from your dashboard only. The other person will not be affected. This cannot be undone.'
                         : 'This will permanently remove this Peace Ping. The other person will never know you sent it. This cannot be undone.'
                 );
                 if (!confirmed) return;

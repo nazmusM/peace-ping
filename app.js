@@ -215,10 +215,10 @@ if (pingForm) {
 
             if (response.body.matched) {
                 matchInfo.hidden = false;
-                matchMessage.textContent = "🎉 Match found! Check your SMS for the private preference link.";
-                showResult(resultEl, "🎉 Match found! Check your SMS for the private link.", "ok");
+                matchMessage.textContent = "Match found! Check your SMS for the private preference link.";
+                showResult(resultEl, "Match found! Check your SMS for the private link.", "ok");
             } else {
-                showResult(resultEl, "Peace Ping sent. You can track it from your dashboard; if they also ping you, both of you receive secure links for preferences.", "ok");
+                showResult(resultEl, "Peace Ping sent. You can track it from your dashboard. If they also ping you, both of you receive secure preference links.", "ok");
             }
         } catch (error) {
             showResult(resultEl, "Error sending Peace Ping.", "warn");

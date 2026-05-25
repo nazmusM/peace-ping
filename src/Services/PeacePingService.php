@@ -35,6 +35,22 @@ class PeacePingService
             throw new InvalidArgumentException('You cannot ping yourself. Please enter a different phone number.');
         }
 
+        // Check if a completed match already exists for this pair — prevent re-sending
+        $existingCompleted = $this->db->prepare(
+            'SELECT id FROM matches
+             WHERE ((fingerprint_a = ? AND fingerprint_b = ?) OR (fingerprint_a = ? AND fingerprint_b = ?))
+               AND (status = \'completed\' OR completed_at IS NOT NULL)
+             LIMIT 1'
+        );
+        $existingCompleted->bind_param('ssss', $userFingerprint, $fingerprintTarget, $fingerprintTarget, $userFingerprint);
+        $existingCompleted->execute();
+        $completedRow = $existingCompleted->get_result()->fetch_assoc();
+        $existingCompleted->close();
+
+        if ($completedRow) {
+            throw new InvalidArgumentException('You have already completed the Peace Ping process with this person. Both parties need to delete their pings from the dashboard to start a new one.');
+        }
+
         $this->ensurePingMetadataColumns();
         $targetMasked = $this->maskPhone($normalizedTarget);
         $recipientName = trim($recipientName);
@@ -87,10 +103,17 @@ class PeacePingService
         if ($reverseResult->num_rows > 0) {
             $reverseData = $reverseResult->fetch_assoc();
             $reversePing->close();
+            $otherUserId = (int) $reverseData['user_id'];
 
-            $matchId = $this->createMatch($userId, (int) $reverseData['user_id'], $userFingerprint, $fingerprintTarget);
+            $matchId = $this->createMatch($userId, $otherUserId, $userFingerprint, $fingerprintTarget);
             if ($matchId) {
-                $this->sendStage2Notifications($matchId, $userId, (int) $reverseData['user_id']);
+                // Only send SMS/issue token if user doesn't already have a valid one
+                if (!$this->userHasValidToken($matchId, $userId)) {
+                    $this->issueToken($matchId, $userId);
+                }
+                if (!$this->userHasValidToken($matchId, $otherUserId)) {
+                    $this->issueToken($matchId, $otherUserId);
+                }
 
                 return [
                     'matched' => true,
@@ -182,8 +205,13 @@ class PeacePingService
 
     private function sendStage2Notifications(int $matchId, int $userAId, int $userBId): void
     {
-        $tokenA = bin2hex(random_bytes(32));
-        $tokenB = bin2hex(random_bytes(32));
+        $this->issueToken($matchId, $userAId);
+        $this->issueToken($matchId, $userBId);
+    }
+
+    private function issueToken(int $matchId, int $userId): void
+    {
+        $token = bin2hex(random_bytes(32));
         $expiresAt = date('Y-m-d H:i:s', time() + 7 * 24 * 60 * 60);
 
         $stmt = $this->db->prepare(
@@ -193,27 +221,29 @@ class PeacePingService
         if ($stmt === false) {
             return;
         }
-        $stmt->bind_param('iiss', $matchId, $userAId, $tokenA, $expiresAt);
-        if (!$stmt->execute()) {
-        }
-
-        $stmt->bind_param('iiss', $matchId, $userBId, $tokenB, $expiresAt);
-        if (!$stmt->execute()) {
-        }
+        $stmt->bind_param('iiss', $matchId, $userId, $token, $expiresAt);
+        $stmt->execute();
         $stmt->close();
 
-        $contactA = $this->userService->getUserContact($userAId);
-        $contactB = $this->userService->getUserContact($userBId);
-
-        if ($contactA !== null) {
-            $messageA = $this->buildPreferencePromptMessage($this->buildPreferenceUrl($tokenA), $this->buildDashboardUrl());
-            $this->notificationService->sendSmsMessage($contactA, $messageA);
+        $contact = $this->userService->getUserContact($userId);
+        if ($contact !== null) {
+            $message = $this->buildPreferencePromptMessage($this->buildPreferenceUrl($token), $this->buildDashboardUrl());
+            $this->notificationService->sendSmsMessage($contact, $message);
         }
+    }
 
-        if ($contactB !== null) {
-            $messageB = $this->buildPreferencePromptMessage($this->buildPreferenceUrl($tokenB), $this->buildDashboardUrl());
-            $this->notificationService->sendSmsMessage($contactB, $messageB);
-        }
+    private function userHasValidToken(int $matchId, int $userId): bool
+    {
+        $stmt = $this->db->prepare(
+            'SELECT id FROM match_tokens
+             WHERE match_id = ? AND user_id = ? AND is_used = 0 AND expires_at > NOW()
+             LIMIT 1'
+        );
+        $stmt->bind_param('ii', $matchId, $userId);
+        $stmt->execute();
+        $exists = (bool) $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $exists;
     }
 
     public function submitPreference(string $token, string $preference): array
@@ -439,66 +469,22 @@ class PeacePingService
 
     public function deletePing(int $pingId, int $userId): bool
     {
-        $ping = $this->db->prepare(
-            'SELECT id, fingerprint_self, fingerprint_target FROM pings WHERE id = ? AND user_id = ? LIMIT 1'
-        );
-        $ping->bind_param('ii', $pingId, $userId);
-        $ping->execute();
-        $row = $ping->get_result()->fetch_assoc();
-        $ping->close();
+        $stmt = $this->db->prepare('SELECT id FROM pings WHERE id = ? AND user_id = ? LIMIT 1');
+        $stmt->bind_param('ii', $pingId, $userId);
+        $stmt->execute();
+        $exists = (bool) $stmt->get_result()->fetch_assoc();
+        $stmt->close();
 
-        if (!$row) {
+        if (!$exists) {
             return false;
         }
 
-        $this->db->begin_transaction();
+        $delete = $this->db->prepare('DELETE FROM pings WHERE id = ? AND user_id = ?');
+        $delete->bind_param('ii', $pingId, $userId);
+        $result = $delete->execute();
+        $delete->close();
 
-        try {
-            // Find any match linked to this ping's fingerprint pair
-            $findMatch = $this->db->prepare(
-                'SELECT id FROM matches
-                 WHERE (fingerprint_a = ? AND fingerprint_b = ?)
-                    OR (fingerprint_a = ? AND fingerprint_b = ?)
-                 LIMIT 1'
-            );
-            $findMatch->bind_param(
-                'ssss',
-                $row['fingerprint_self'], $row['fingerprint_target'],
-                $row['fingerprint_target'], $row['fingerprint_self']
-            );
-            $findMatch->execute();
-            $matchRow = $findMatch->get_result()->fetch_assoc();
-            $findMatch->close();
-
-            if ($matchRow) {
-                $matchId = (int) $matchRow['id'];
-                $deleteMp = $this->db->prepare('DELETE FROM match_preferences WHERE match_id = ?');
-                $deleteMp->bind_param('i', $matchId);
-                $deleteMp->execute();
-                $deleteMp->close();
-
-                $deleteMt = $this->db->prepare('DELETE FROM match_tokens WHERE match_id = ?');
-                $deleteMt->bind_param('i', $matchId);
-                $deleteMt->execute();
-                $deleteMt->close();
-
-                $deleteM = $this->db->prepare('DELETE FROM matches WHERE id = ?');
-                $deleteM->bind_param('i', $matchId);
-                $deleteM->execute();
-                $deleteM->close();
-            }
-
-            $deleteP = $this->db->prepare('DELETE FROM pings WHERE id = ? AND user_id = ?');
-            $deleteP->bind_param('ii', $pingId, $userId);
-            $deleted = $deleteP->execute();
-            $deleteP->close();
-
-            $this->db->commit();
-            return $deleted;
-        } catch (\Throwable $e) {
-            $this->db->rollback();
-            return false;
-        }
+        return $result;
     }
 
     private function resetMatch(int $matchId): void

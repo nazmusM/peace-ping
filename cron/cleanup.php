@@ -40,6 +40,17 @@ try {
         'DELETE FROM rate_limits WHERE created_at < (NOW() - INTERVAL 2 DAY)',
     ];
 
+    // Clean up orphaned matches (no pings reference them anymore)
+    $orphanMatches = $db->prepare(
+        "DELETE m FROM matches m
+         LEFT JOIN pings p ON
+             (p.fingerprint_self = m.fingerprint_a AND p.fingerprint_target = m.fingerprint_b)
+             OR (p.fingerprint_self = m.fingerprint_b AND p.fingerprint_target = m.fingerprint_a)
+         WHERE p.id IS NULL"
+    );
+    $orphanMatches->execute();
+    $orphanMatches->close();
+
     foreach ($statements as $sql) {
         $stmt = $db->prepare($sql);
         $stmt->execute();
