@@ -1,0 +1,2 @@
+[25-May-2026 02:28:57 UTC] Twilio API error. HTTP Code: 400, Response: {"code":21408,"message":"Permission to send an SMS has not been enabled for the region indicated by the 'To' number: +880161036XXXX","more_info":"https://www.twilio.com/docs/errors/21408","status":400}
+[25-May-2026 02:28:57 UTC] Twilio API error. HTTP Code: 400, Response: {"code":21408,"message":"Permission to send an SMS has not been enabled for the region indicated by the 'To' number: +880161036XXXX","more_info":"https://www.twilio.com/docs/errors/21408","status":400}

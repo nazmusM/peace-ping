@@ -540,7 +540,12 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
 
         $deleted = $peacePingService->deletePing($pingId, (int) $currentUser['id']);
         if ($deleted) {
-            Response::json(['success' => true, 'message' => 'Peace Ping cancelled.']);
+            $summary = getDashboardSummary($db, (int) $currentUser['id']);
+            Response::json([
+                'success' => true,
+                'message' => 'Peace Ping cancelled.',
+                'counts' => $summary['counts']
+            ]);
         } else {
             Response::json(['error' => 'Could not delete ping. It may not exist or may not belong to you.'], 400);
         }
@@ -1052,6 +1057,7 @@ if ($path === '/login') {
                     </div>
                     <button type="submit" class="btn">Log In</button>
                 </form>
+                <p id="login-lockout-msg" class="result warn" style="display:none"></p>
                 <p id="login-result" class="result" aria-live="polite"></p>
             </article>
 
@@ -1174,15 +1180,71 @@ if ($path === '/login') {
 
             if (!response.ok) {
                 showResult(loginResult, response.body.error || 'Login failed.', 'warn');
+
+                // Handle login lockout countdown
+                if (response.body.lockout_remaining) {
+                    var lockoutEnd = Date.now() + (response.body.lockout_remaining * 1000);
+                    setCookie('login_lockout_end', lockoutEnd.toString(), 1);
+                    startLockoutCountdown(lockoutEnd);
+                }
                 return;
             }
 
             // Always save phone on successful login
             setCookie('remembered_phone', phone, 365);
+            eraseCookie('login_lockout_end');
 
             showResult(loginResult, response.body.message, 'ok');
             window.location.href = '/dashboard';
         });
+
+        // Lockout countdown display
+        var lockoutDisplay = document.getElementById('login-lockout-msg');
+        var lockoutTimer = null;
+
+        function startLockoutCountdown(endTime) {
+            var loginBtn = loginForm.querySelector('button[type="submit"]');
+            var phoneInput = document.getElementById('login-phone');
+            var passwordInput = document.getElementById('login-password');
+
+            function tick() {
+                var remaining = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+                if (remaining <= 0) {
+                    lockoutDisplay.style.display = 'none';
+                    loginBtn.disabled = false;
+                    phoneInput.disabled = false;
+                    passwordInput.disabled = false;
+                    loginBtn.textContent = 'Log In';
+                    clearInterval(lockoutTimer);
+                    eraseCookie('login_lockout_end');
+                    return;
+                }
+                var mins = Math.floor(remaining / 60);
+                var secs = remaining % 60;
+                lockoutDisplay.textContent = 'Too many attempts. Try again in ' + mins + 'm ' + (secs < 10 ? '0' : '') + secs + 's.';
+                lockoutDisplay.style.display = 'block';
+                loginBtn.disabled = true;
+                phoneInput.disabled = true;
+                passwordInput.disabled = true;
+                loginBtn.textContent = 'Locked';
+            }
+
+            tick();
+            lockoutTimer = setInterval(tick, 1000);
+        }
+
+        // Check for existing lockout cookie on page load
+        (function () {
+            var cookieVal = getCookie('login_lockout_end');
+            if (cookieVal) {
+                var endTime = parseInt(cookieVal, 10);
+                if (!isNaN(endTime) && endTime > Date.now()) {
+                    startLockoutCountdown(endTime);
+                } else {
+                    eraseCookie('login_lockout_end');
+                }
+            }
+        })();
     </script>
 <?php
     $content = ob_get_clean();
@@ -1596,15 +1658,15 @@ if ($path === '/dashboard') {
 
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-number"><?php echo (int) $counts['pending']; ?></div>
+                <div class="stat-number" id="stat-pending"><?php echo (int) $counts['pending']; ?></div>
                 <div class="stat-label">Pending</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number"><?php echo (int) $counts['matched']; ?></div>
+                <div class="stat-number" id="stat-matched"><?php echo (int) $counts['matched']; ?></div>
                 <div class="stat-label">Matched</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number"><?php echo (int) $counts['completed']; ?></div>
+                <div class="stat-number" id="stat-completed"><?php echo (int) $counts['completed']; ?></div>
                 <div class="stat-label">Completed</div>
             </div>
         </div>
@@ -1714,6 +1776,11 @@ if ($path === '/dashboard') {
 
                     if (response.ok && data.success) {
                         this.closest('.ping-card').remove();
+                        if (data.counts) {
+                            document.getElementById('stat-pending').textContent = data.counts.pending;
+                            document.getElementById('stat-matched').textContent = data.counts.matched;
+                            document.getElementById('stat-completed').textContent = data.counts.completed;
+                        }
                     } else {
                         await showAlert('Could Not Delete', data.error || 'Could not delete ping.');
                         this.disabled = false;

@@ -136,9 +136,17 @@ class UserController
             return;
         }
 
-        $result = $this->userService->loginWithPassword($phone, $password);
-
-        Response::json($result);
+        try {
+            $result = $this->userService->loginWithPassword($phone, $password);
+            Response::json($result);
+        } catch (\InvalidArgumentException $e) {
+            $remaining = $this->userService->getLoginLockoutRemaining($phone);
+            if ($remaining > 0) {
+                Response::json(['error' => $e->getMessage(), 'lockout_remaining' => $remaining], 429);
+            } else {
+                Response::json(['error' => $e->getMessage()], 400);
+            }
+        }
     }
 
     private function handleVerify(array $input): void

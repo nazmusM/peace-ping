@@ -506,6 +506,30 @@ class UserService
         return (int) ($row['count'] ?? 0) >= 5;
     }
 
+    public function getLoginLockoutRemaining(string $phone): int
+    {
+        $normalizedPhone = $this->fingerprint->formatPhone($phone);
+        $contactHash = $this->fingerprint->fingerprint($normalizedPhone, $this->pepper);
+
+        $stmt = $this->db->prepare(
+            'SELECT UNIX_TIMESTAMP(attempted_at) AS attempted_ts FROM login_attempts
+             WHERE contact_hash = ? AND attempted_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+             ORDER BY attempted_at DESC
+             LIMIT 1 OFFSET 4'
+        );
+        $stmt->bind_param('s', $contactHash);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$row) {
+            return 0;
+        }
+
+        $lockoutEnd = ((int) $row['attempted_ts']) + 900;
+        return max(0, $lockoutEnd - time());
+    }
+
     public function recordLoginAttempt(string $phone, bool $success): void
     {
         $normalizedPhone = $this->fingerprint->formatPhone($phone);
