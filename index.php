@@ -1031,7 +1031,7 @@ if ($path === '/login') {
         <section class="grid">
             <article class="card">
                 <h2>Log In</h2>
-                <form id="login-form">
+                <form id="login-form" novalidate>
                     <div class="form-group" id="phone-remembered-group" style="display:none">
                         <label>Mobile Number</label>
                         <p class="remembered-phone-text" id="phone-display"></p>
@@ -1039,7 +1039,7 @@ if ($path === '/login') {
                     </div>
                     <div class="form-group" id="phone-input-group">
                         <label for="login-phone">Mobile Number</label>
-                        <input type="tel" id="login-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
+                        <input type="tel" id="login-phone" name="phone" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel">
                         <small>Enter the mobile number you used when registering.</small>
                     </div>
                     <div class="form-group">
@@ -1131,6 +1131,14 @@ if ($path === '/login') {
 
         let savedPhone = getCookie('remembered_phone');
 
+        function maskPhone(phone) {
+            var digits = phone.replace(/\D/g, '');
+            if (digits.length < 6) return phone;
+            var start = digits.slice(0, 4);
+            var end = digits.slice(-3);
+            return start + '***' + end;
+        }
+
         function showPhoneInput() {
             phoneRememberedGroup.style.display = 'none';
             phoneInputGroup.style.display = 'block';
@@ -1138,7 +1146,7 @@ if ($path === '/login') {
         }
 
         function showRememberedPhone(phone) {
-            phoneDisplay.textContent = phone;
+            phoneDisplay.textContent = maskPhone(phone);
             phoneRememberedGroup.style.display = 'block';
             phoneInputGroup.style.display = 'none';
         }
@@ -1147,57 +1155,62 @@ if ($path === '/login') {
             showRememberedPhone(savedPhone);
         }
 
-        clearPhoneLink.addEventListener('click', function (e) {
-            e.preventDefault();
-            savedPhone = null;
-            eraseCookie('remembered_phone');
-            showPhoneInput();
-            document.getElementById('login-phone').focus();
-        });
-
-        loginForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
-
-            const phoneInput = document.getElementById('login-phone');
-            const phone = savedPhone || phoneInput.value.trim();
-            const password = document.getElementById('login-password').value;
-
-            if (!phone) {
-                showResult(loginResult, 'Please enter your mobile number.', 'warn');
-                return;
-            }
-
-            if (!password) {
-                showResult(loginResult, 'Please enter your password.', 'warn');
-                return;
-            }
-
-            showResult(loginResult, 'Logging in...', null);
-            const response = await postJson('/api/register', {
-                action: 'login',
-                phone: phone,
-                password: password
+        if (clearPhoneLink) {
+            clearPhoneLink.addEventListener('click', function (e) {
+                e.preventDefault();
+                savedPhone = null;
+                eraseCookie('remembered_phone');
+                showPhoneInput();
+                document.getElementById('login-phone').focus();
             });
+        }
 
-            if (!response.ok) {
-                showResult(loginResult, response.body.error || 'Login failed.', 'warn');
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (event) => {
+                event.preventDefault();
 
-                // Handle login lockout countdown
-                if (response.body.lockout_remaining) {
-                    var lockoutEnd = Date.now() + (response.body.lockout_remaining * 1000);
-                    setCookie('login_lockout_end', lockoutEnd.toString(), 1);
-                    startLockoutCountdown(lockoutEnd);
+                try {
+                    const phone = savedPhone || document.getElementById('login-phone').value.trim();
+                    const password = document.getElementById('login-password').value;
+
+                    if (!phone) {
+                        showResult(loginResult, 'Please enter your mobile number.', 'warn');
+                        return;
+                    }
+
+                    if (!password) {
+                        showResult(loginResult, 'Please enter your password.', 'warn');
+                        return;
+                    }
+
+                    showResult(loginResult, 'Logging in...', null);
+                    const response = await postJson('/api/register', {
+                        action: 'login',
+                        phone: phone,
+                        password: password
+                    });
+
+                    if (!response.ok) {
+                        showResult(loginResult, response.body.error || 'Login failed.', 'warn');
+
+                        if (response.body.lockout_remaining) {
+                            var lockoutEnd = Date.now() + (response.body.lockout_remaining * 1000);
+                            setCookie('login_lockout_end', lockoutEnd.toString(), 1);
+                            startLockoutCountdown(lockoutEnd);
+                        }
+                        return;
+                    }
+
+                    setCookie('remembered_phone', phone, 365);
+                    eraseCookie('login_lockout_end');
+
+                    showResult(loginResult, response.body.message, 'ok');
+                    window.location.href = '/dashboard';
+                } catch (err) {
+                    showResult(loginResult, 'Something went wrong. Please try again.', 'warn');
                 }
-                return;
-            }
-
-            // Always save phone on successful login
-            setCookie('remembered_phone', phone, 365);
-            eraseCookie('login_lockout_end');
-
-            showResult(loginResult, response.body.message, 'ok');
-            window.location.href = '/dashboard';
-        });
+            });
+        }
 
         // Lockout countdown display
         var lockoutDisplay = document.getElementById('login-lockout-msg');
@@ -1246,6 +1259,16 @@ if ($path === '/login') {
                 } else {
                     eraseCookie('login_lockout_end');
                 }
+            }
+        })();
+
+        // Test helper: ?save=PHONE sets a remembered phone cookie without logging in
+        (function () {
+            var params = new URLSearchParams(window.location.search);
+            var testPhone = params.get('save');
+            if (testPhone) {
+                setCookie('remembered_phone', testPhone, 365);
+                window.location.href = '/login';
             }
         })();
     </script>
