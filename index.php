@@ -1706,8 +1706,8 @@ if ($path === '/dashboard') {
             <?php if (empty($pings)): ?>
                 <div class="empty-state">
                     <div class="empty-state-icon">-</div>
-                    <p>No pings submitted yet.</p>
-                    <a href="/ping" class="btn">Send Your First Ping</a>
+                    
+                    <a href="/ping" class="btn">SEND A PING</a>
                 </div>
             <?php else: ?>
                 <?php foreach ($pings as $ping): ?>
@@ -1779,7 +1779,7 @@ if ($path === '/dashboard') {
                 if (!confirmed) return;
 
                 this.disabled = true;
-                this.textContent = 'Cancelling...';
+                this.textContent = isMatched ? 'Deleting' : 'Cancelling...';
 
                 try {
                     const response = await fetch('/api/delete-ping', {
@@ -1797,14 +1797,14 @@ if ($path === '/dashboard') {
                             document.getElementById('stat-completed').textContent = data.counts.completed;
                         }
                     } else {
-                        await showAlert('Could Not Delete', data.error || 'Could not delete ping.');
+                        await showAlert(`Could Not ${isMatched ? 'Delete' : 'Cancel'}`, data.error || `Could not ${isMatched ? 'delete' : 'cancel'} ping.`);
                         this.disabled = false;
-                        this.textContent = 'Cancel';
+                        this.textContent = isMatched ? 'Delete' : 'Cancel';
                     }
                 } catch (e) {
-                    await showAlert('Error', 'Error cancelling ping.');
+                    await showAlert('Error', `Could not ${isMatched ? 'delete' : 'cancel'} ping.`);
                     this.disabled = false;
-                    this.textContent = 'Cancel';
+                    this.textContent = isMatched ? 'Delete' : 'Cancel';
                 }
             });
         });

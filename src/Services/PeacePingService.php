@@ -35,20 +35,19 @@ class PeacePingService
             throw new InvalidArgumentException('You cannot ping yourself. Please enter a different phone number.');
         }
 
-        // Check if a completed match already exists for this pair — prevent re-sending
-        $existingCompleted = $this->db->prepare(
+        // Check if a match already exists for this pair — prevent re-sending
+        $existingMatch = $this->db->prepare(
             'SELECT id FROM matches
              WHERE ((fingerprint_a = ? AND fingerprint_b = ?) OR (fingerprint_a = ? AND fingerprint_b = ?))
-               AND (status = \'completed\' OR completed_at IS NOT NULL)
              LIMIT 1'
         );
-        $existingCompleted->bind_param('ssss', $userFingerprint, $fingerprintTarget, $fingerprintTarget, $userFingerprint);
-        $existingCompleted->execute();
-        $completedRow = $existingCompleted->get_result()->fetch_assoc();
-        $existingCompleted->close();
+        $existingMatch->bind_param('ssss', $userFingerprint, $fingerprintTarget, $fingerprintTarget, $userFingerprint);
+        $existingMatch->execute();
+        $matchRow = $existingMatch->get_result()->fetch_assoc();
+        $existingMatch->close();
 
-        if ($completedRow) {
-            throw new InvalidArgumentException('You have already completed the Peace Ping process with this person. Both parties need to delete their pings from the dashboard to start a new one.');
+        if ($matchRow) {
+            throw new InvalidArgumentException('You have already completed the Peace Ping process with this person. To proceed with a new ping to this person, both parties need to delete their pings from the dashboard, or wait until they expire (30 days from a completed ping).');
         }
 
         $this->ensurePingMetadataColumns();
