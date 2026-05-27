@@ -542,7 +542,12 @@ if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
             exit;
         }
 
-        $deleted = $peacePingService->deletePing($pingId, (int) $currentUser['id']);
+        try {
+            $deleted = $peacePingService->deletePing($pingId, (int) $currentUser['id']);
+        } catch (\InvalidArgumentException $e) {
+            Response::json(['error' => $e->getMessage()], 400);
+            exit;
+        }
         if ($deleted) {
             $summary = getDashboardSummary($db, (int) $currentUser['id']);
             Response::json([
@@ -1754,7 +1759,9 @@ if ($path === '/dashboard') {
                             <?php if ($token !== ''): ?>
                                 <a href="/preferences?token=<?php echo urlencode($token); ?>" class="btn btn-sm btn-secondary">Preferences</a>
                             <?php endif; ?>
+                            <?php if ($status !== 'matched'): ?>
                             <button type="button" class="btn btn-sm btn-danger btn-delete-ping" data-ping-id="<?php echo (int) $ping['id']; ?>" data-status="<?php echo $status; ?>"><?php echo $status === 'pending' ? 'Cancel' : 'Delete'; ?></button>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>

@@ -469,7 +469,8 @@ class PeacePingService
     public function deletePing(int $pingId, int $userId): bool
     {
         $stmt = $this->db->prepare(
-            'SELECT p.fingerprint_self, p.fingerprint_target, m.id AS match_id
+            'SELECT p.fingerprint_self, p.fingerprint_target,
+                    m.id AS match_id, m.completed_at, m.status AS match_status
              FROM pings p
              LEFT JOIN matches m
                ON ((m.fingerprint_a = p.fingerprint_self AND m.fingerprint_b = p.fingerprint_target)
@@ -489,6 +490,14 @@ class PeacePingService
         $fingerprintSelf = $row['fingerprint_self'];
         $fingerprintTarget = $row['fingerprint_target'];
         $matchId = $row['match_id'] !== null ? (int) $row['match_id'] : null;
+
+        // Block deletion during stage 2 (match exists but not completed)
+        if ($matchId !== null
+            && $row['completed_at'] === null
+            && ($row['match_status'] ?? '') !== 'completed'
+        ) {
+            throw new \InvalidArgumentException('You cannot delete a ping while the matching process is active. You can only cancel before a match is found, or delete once the process is complete.');
+        }
 
         $delete = $this->db->prepare('DELETE FROM pings WHERE id = ? AND user_id = ?');
         $delete->bind_param('ii', $pingId, $userId);
