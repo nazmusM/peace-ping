@@ -469,22 +469,75 @@ class PeacePingService
 
     public function deletePing(int $pingId, int $userId): bool
     {
-        $stmt = $this->db->prepare('SELECT id FROM pings WHERE id = ? AND user_id = ? LIMIT 1');
+        $stmt = $this->db->prepare(
+            'SELECT p.fingerprint_self, p.fingerprint_target, m.id AS match_id
+             FROM pings p
+             LEFT JOIN matches m
+               ON ((m.fingerprint_a = p.fingerprint_self AND m.fingerprint_b = p.fingerprint_target)
+                   OR (m.fingerprint_a = p.fingerprint_target AND m.fingerprint_b = p.fingerprint_self))
+             WHERE p.id = ? AND p.user_id = ?
+             LIMIT 1'
+        );
         $stmt->bind_param('ii', $pingId, $userId);
         $stmt->execute();
-        $exists = (bool) $stmt->get_result()->fetch_assoc();
+        $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
-        if (!$exists) {
+        if (!$row) {
             return false;
         }
+
+        $fingerprintSelf = $row['fingerprint_self'];
+        $fingerprintTarget = $row['fingerprint_target'];
+        $matchId = $row['match_id'] !== null ? (int) $row['match_id'] : null;
 
         $delete = $this->db->prepare('DELETE FROM pings WHERE id = ? AND user_id = ?');
         $delete->bind_param('ii', $pingId, $userId);
         $result = $delete->execute();
         $delete->close();
 
-        return $result;
+        if (!$result) {
+            return false;
+        }
+
+        if ($matchId !== null) {
+            $remaining = $this->db->prepare(
+                'SELECT COUNT(*) AS cnt FROM pings
+                 WHERE (fingerprint_self = ? AND fingerprint_target = ?)
+                    OR (fingerprint_self = ? AND fingerprint_target = ?)'
+            );
+            $remaining->bind_param('ssss', $fingerprintSelf, $fingerprintTarget, $fingerprintTarget, $fingerprintSelf);
+            $remaining->execute();
+            $countRow = $remaining->get_result()->fetch_assoc();
+            $remaining->close();
+
+            if ($countRow && (int) $countRow['cnt'] === 0) {
+                $this->db->begin_transaction();
+                try {
+                    $delTokens = $this->db->prepare('DELETE FROM match_tokens WHERE match_id = ?');
+                    $delTokens->bind_param('i', $matchId);
+                    $delTokens->execute();
+                    $delTokens->close();
+
+                    $delPrefs = $this->db->prepare('DELETE FROM match_preferences WHERE match_id = ?');
+                    $delPrefs->bind_param('i', $matchId);
+                    $delPrefs->execute();
+                    $delPrefs->close();
+
+                    $delMatch = $this->db->prepare('DELETE FROM matches WHERE id = ?');
+                    $delMatch->bind_param('i', $matchId);
+                    $delMatch->execute();
+                    $delMatch->close();
+
+                    $this->db->commit();
+                } catch (\Exception $e) {
+                    $this->db->rollback();
+                    error_log('Failed to clean up orphaned match: ' . $e->getMessage());
+                }
+            }
+        }
+
+        return true;
     }
 
     private function resetMatch(int $matchId): void

@@ -74,7 +74,7 @@ class UserController
         $confirmPhone = trim($input['confirm_phone'] ?? '');
         $password = trim($input['password'] ?? '');
         $confirmPassword = trim($input['confirm_password'] ?? '');
-        $name = trim($input['name'] ?? 'Peace Ping User');
+        $name = trim($input['name'] ?? '');
 
         if ($phone === '') {
             Response::json(['error' => 'Mobile number is required.'], 400);

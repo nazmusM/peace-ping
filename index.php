@@ -263,7 +263,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
                 toggle.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
             });
 
-            async function showConfirm(title, message) {
+            async function showConfirm(title, message, confirmText) {
                 return new Promise((resolve) => {
                     modalIcon.textContent = '?';
                     modalIcon.style.background = 'rgba(217, 119, 6, 0.12)';
@@ -273,7 +273,7 @@ function renderPage(string $title, string $content, string $page = 'home'): void
 
                     modalActions.innerHTML = `
                         <button class="btn btn-sm btn-modal-cancel" id="modal-cancel">Cancel</button>
-                        <button class="btn btn-sm btn-modal-confirm" id="modal-confirm">Yes, Cancel Ping</button>
+                        <button class="btn btn-sm btn-modal-confirm" id="modal-confirm">${confirmText || 'Yes, Cancel Ping'}</button>
                     `;
 
                     openModal();
@@ -397,7 +397,9 @@ function getDashboardSummary(mysqli $db, int $userId): array
     $stmt = $db->prepare(
         "SELECT p.id, p.created_at, p.fingerprint_self, p.fingerprint_target, p.target_masked, p.recipient_name,
                 m.id AS match_id, m.status AS match_status, m.stage, m.completed_at,
+                m.user_a_id, m.user_b_id,
                 mt.token, mt.is_used, mt.expires_at,
+                mp.id AS pref_id,
                 CASE
                     WHEN m.id IS NULL THEN 'pending'
                     WHEN m.completed_at IS NOT NULL OR m.status = 'completed' THEN 'completed'
@@ -411,6 +413,8 @@ function getDashboardSummary(mysqli $db, int $userId): array
            )
          LEFT JOIN match_tokens mt
            ON mt.match_id = m.id AND mt.user_id = p.user_id AND mt.is_used = 0 AND mt.expires_at > NOW()
+         LEFT JOIN match_preferences mp
+           ON mp.match_id = m.id AND mp.user_id = p.user_id
          WHERE p.user_id = ?
          ORDER BY p.created_at DESC"
     );
@@ -799,12 +803,6 @@ if ($path === '/register') {
             if (tone) {
                 target.classList.add(tone);
             }
-
-            // Scroll to result for better UX on mobile
-            target.scrollIntoView({
-                behavior: 'smooth',
-                block: 'nearest'
-            });
         }
 
         // Registration form handler
@@ -902,16 +900,7 @@ if ($path === '/register') {
             registerPasswordConfirmError.textContent = passwordError;
 
             const message = getRegisterValidationMessage();
-            if (message) {
-                showResult(registerResult, message, 'warn');
-                submitButton.disabled = true;
-            } else if (phoneError || passwordError) {
-                showResult(registerResult, '', null);
-                submitButton.disabled = true;
-            } else {
-                showResult(registerResult, '', null);
-                submitButton.disabled = false;
-            }
+            submitButton.disabled = !!(message || phoneError || passwordError);
         };
 
         registerPhone.addEventListener('input', updateRegisterValidation);
@@ -1326,7 +1315,6 @@ if ($path === '/forgot-password') {
             target.textContent = text;
             target.classList.remove("ok", "warn");
             if (tone) target.classList.add(tone);
-            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         const forgotForm = document.getElementById('forgot-form');
@@ -1476,7 +1464,6 @@ if ($path === '/reset-password') {
             target.textContent = text;
             target.classList.remove("ok", "warn");
             if (tone) target.classList.add(tone);
-            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         const resetForm = document.getElementById('reset-form');
@@ -1587,6 +1574,7 @@ if ($path === '/ping') {
                         <div class="form-group">
                             <label for="ping-target">Mobile Number to Ping</label>
                             <input type="tel" id="ping-target" name="target" placeholder="07xxx xxxxxx or +447xxx xxxxxx" autocomplete="tel" inputmode="tel" required>
+                            <p class="field-error" id="ping-target-error" aria-live="polite"></p>
                             <small>Enter a UK mobile (07xxx xxxxxx) or international number (+44123...). We fix the format for you.</small>
                         </div>
                         <div class="form-group">
@@ -1737,6 +1725,8 @@ if ($path === '/dashboard') {
                         ? $peacePingService->getFinalMessageForMatch((int) $ping['match_id'])
                         : null;
                     $daysLeft = (int) ($ping['days_until_expiry'] ?? 30);
+                    $otherName = $recipientName;
+                    $hasSubmittedPreference = !empty($ping['pref_id']);
                     ?>
                     <div class="ping-card dashboard-ping">
                         <div class="ping-card-main">
@@ -1748,10 +1738,10 @@ if ($path === '/dashboard') {
                             <p>
                                 <?php if ($status === 'pending'): ?>
                                     Waiting for a match. The other person has not been told you sent a Peace Ping.
-                                <?php elseif ($status === 'matched' && $token !== ''): ?>
-                                    Match found. Your private preference link is ready.
+                                <?php elseif ($status === 'matched' && $hasSubmittedPreference): ?>
+                                    Waiting for <?php echo htmlspecialchars($otherName !== '' ? $otherName : 'the other person'); ?> to submit their preference.
                                 <?php elseif ($status === 'matched'): ?>
-                                    Match found. Waiting for your preference or final message.
+                                    Match found. Submit your preference for next steps via the <strong>Preferences</strong> button, below.
                                 <?php elseif ($finalMessage !== null): ?>
                                     <?php echo nl2br(htmlspecialchars($finalMessage)); ?>
                                 <?php else: ?>
@@ -1783,7 +1773,8 @@ if ($path === '/dashboard') {
                     isMatched ? 'Delete Peace Ping?' : 'Cancel Peace Ping?',
                     isMatched
                         ? 'This will remove this Ping from your dashboard only. The other person will not be affected. This cannot be undone.'
-                        : 'This will permanently remove this Peace Ping. The other person will never know you sent it. This cannot be undone.'
+                        : 'This will permanently remove this Peace Ping. The other person will never know you sent it. This cannot be undone.',
+                    isMatched ? 'Yes, Delete Ping' : 'Yes, Cancel Ping'
                 );
                 if (!confirmed) return;
 

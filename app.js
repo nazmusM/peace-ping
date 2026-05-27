@@ -21,9 +21,6 @@ function showResult(target, text, tone) {
     if (tone) {
         target.classList.add(tone);
     }
-
-    // Scroll to result for better UX on mobile
-    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function debounce(func, wait) {
@@ -72,6 +69,7 @@ const contactDetails = document.getElementById("contact-details");
 const phoneInput = document.getElementById("ping-target");
 const confirmPhoneInput = document.getElementById("ping-target-confirm");
 const pingResult = document.getElementById("ping-result");
+const pingTargetError = document.getElementById("ping-target-error");
 const pingTargetConfirmError = document.getElementById("ping-target-confirm-error");
 const pingSubmitButton = pingForm?.querySelector('button[type="submit"]');
 const normalizePhone = (value) => {
@@ -88,60 +86,36 @@ const updatePingValidation = () => {
         return;
     }
 
-    let message = '';
     const targetValue = phoneInput?.value.trim() ?? '';
     const confirmTargetValue = confirmPhoneInput?.value.trim() ?? '';
 
+    let phoneError = '';
+    let confirmError = '';
+
     if (targetValue && !validatePhone(targetValue)) {
-        message = 'Please enter a valid mobile number. Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number].';
-    } else if (targetValue && confirmTargetValue && normalizePhone(targetValue) !== normalizePhone(confirmTargetValue)) {
-        message = 'The recipient numbers do not match. Please check both entries before sending.';
+        phoneError = 'Please enter a valid mobile number. Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number].';
     }
 
+    if (targetValue && confirmTargetValue && normalizePhone(targetValue) !== normalizePhone(confirmTargetValue)) {
+        confirmError = 'The recipient numbers do not match. Please check both entries before sending.';
+    }
+
+    if (pingTargetError) {
+        pingTargetError.textContent = phoneError;
+    }
     if (pingTargetConfirmError) {
-        if (targetValue && confirmTargetValue && normalizePhone(targetValue) !== normalizePhone(confirmTargetValue)) {
-            pingTargetConfirmError.textContent = 'The recipient numbers do not match. Please check both entries before sending.';
-        } else {
-            pingTargetConfirmError.textContent = '';
-        }
+        pingTargetConfirmError.textContent = confirmError;
     }
 
-    if (message) {
-        showResult(pingResult, message, 'warn');
-        pingSubmitButton.disabled = true;
-    } else if (pingTargetConfirmError?.textContent) {
-        showResult(pingResult, '', null);
-        pingSubmitButton.disabled = true;
-    } else {
-        showResult(pingResult, '', null);
-        pingSubmitButton.disabled = false;
-    }
+    pingSubmitButton.disabled = !!(phoneError || confirmError);
 };
 
 if (phoneInput) {
-    phoneInput.addEventListener('input', debounce(function (e) {
-        const value = e.target.value;
-        if (value && !validatePhone(value)) {
-            e.target.setCustomValidity('Use 07xxx xxxxxx, +447xxx xxxxxx, or +[country code][number].');
-        } else {
-            e.target.setCustomValidity('');
-        }
-        updatePingValidation();
-    }, 300));
+    phoneInput.addEventListener('input', debounce(updatePingValidation, 300));
 }
 
-if (phoneInput && confirmPhoneInput) {
-    const validateRecipientMatch = () => {
-        if (phoneInput.value.trim() && confirmPhoneInput.value.trim() && normalizePhone(phoneInput.value) !== normalizePhone(confirmPhoneInput.value)) {
-            confirmPhoneInput.setCustomValidity('The recipient numbers do not match.');
-        } else {
-            confirmPhoneInput.setCustomValidity('');
-        }
-        updatePingValidation();
-    };
-
-    phoneInput.addEventListener('input', validateRecipientMatch);
-    confirmPhoneInput.addEventListener('input', validateRecipientMatch);
+if (confirmPhoneInput) {
+    confirmPhoneInput.addEventListener('input', updatePingValidation);
 }
 
 if (pingForm) {

@@ -22,7 +22,7 @@ class UserService
      */
     public function register(string $name, string $phone, string $password): array
     {
-        $name = trim($name) !== '' ? trim($name) : 'Peace Ping User';
+        $name = trim($name);
         if (strlen($name) > 120) {
             throw new InvalidArgumentException('Name must be less than 120 characters.');
         }
