@@ -1786,7 +1786,7 @@ if ($path === '/dashboard') {
                 if (!confirmed) return;
 
                 this.disabled = true;
-                this.textContent = isMatched ? 'Deleting' : 'Cancelling...';
+                this.textContent = isMatched ? 'Deleting...' : 'Cancelling...';
 
                 try {
                     const response = await fetch('/api/delete-ping', {
